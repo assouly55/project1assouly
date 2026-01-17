@@ -162,9 +162,22 @@ function safeString(val: unknown): string | null {
   if (val === null || val === undefined) return null;
   if (typeof val === 'string') return val;
   if (typeof val === 'number') return String(val);
-  if (typeof val === 'object' && 'value' in (val as object)) {
-    const nested = (val as { value: unknown }).value;
-    return typeof nested === 'string' ? nested : (nested != null ? String(nested) : null);
+  if (typeof val === 'object') {
+    // Handle {value: ...} structure
+    if ('value' in (val as object)) {
+      const nested = (val as { value: unknown }).value;
+      return safeString(nested); // Recursive call to handle nested values
+    }
+    // For any other object, try to get a meaningful string
+    try {
+      const str = JSON.stringify(val);
+      // If it's just "{}", return null
+      if (str === '{}' || str === '[]') return null;
+      // Otherwise return the stringified version for debugging
+      return null; // Don't render raw objects
+    } catch {
+      return null;
+    }
   }
   return null;
 }
@@ -355,12 +368,24 @@ export default function TenderDetail() {
       montant: rawAvisMetadata.estimation_totale?.montant ?? rawAvisMetadata.total_estimated_value?.value?.toString() ?? null,
       devise: rawAvisMetadata.estimation_totale?.devise ?? rawAvisMetadata.total_estimated_value?.currency ?? null,
     },
-    lots: (rawAvisMetadata.lots || []).map((lot: any) => ({
-      numero_lot: lot.numero_lot ?? lot.lot_number ?? null,
-      objet_lot: lot.objet_lot ?? lot.lot_subject ?? null,
-      estimation_lot: lot.estimation_lot ?? lot.lot_estimated_value?.toString() ?? null,
-      caution_provisoire: lot.caution_provisoire?.toString() ?? null,
-    })),
+    lots: (rawAvisMetadata.lots || []).map((lot: any) => {
+      // Helper to extract value from potentially nested object
+      const extract = (v: unknown): string | null => {
+        if (v === null || v === undefined) return null;
+        if (typeof v === 'string') return v;
+        if (typeof v === 'number') return String(v);
+        if (typeof v === 'object' && 'value' in (v as object)) {
+          return extract((v as { value: unknown }).value);
+        }
+        return null;
+      };
+      return {
+        numero_lot: extract(lot.numero_lot) ?? extract(lot.lot_number) ?? null,
+        objet_lot: extract(lot.objet_lot) ?? extract(lot.lot_subject) ?? null,
+        estimation_lot: extract(lot.estimation_lot) ?? extract(lot.lot_estimated_value) ?? null,
+        caution_provisoire: extract(lot.caution_provisoire) ?? null,
+      };
+    }),
     website_extended: rawAvisMetadata.website_extended ?? rawAvisMetadata.contact_administratif ? {
       contact_administratif: rawAvisMetadata.website_extended?.contact_administratif ?? rawAvisMetadata.contact_administratif
     } : undefined,
