@@ -1,84 +1,73 @@
-import { motion } from "framer-motion";
+import { useState } from 'react';
+import { FileText, Search, Filter } from 'lucide-react';
+import { AppLayout } from '@/components/layout/AppLayout';
+import { TenderTable } from '@/components/tenders/TenderTable';
+import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
+import { useTenders } from '@/hooks/useTenders';
+import type { TenderSearchParams } from '@/types/tender';
 
-const Index = () => {
+export default function Index() {
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchParams, setSearchParams] = useState<TenderSearchParams>({});
+  
+  const { data, isLoading, error } = useTenders(searchParams);
+  
+  const handleSearch = (e: React.FormEvent) => {
+    e.preventDefault();
+    setSearchParams(prev => ({ ...prev, query: searchQuery }));
+  };
+
+  const tenders = data?.items || [];
+  const totalCount = data?.total || 0;
+
   return (
-    <div className="min-h-screen bg-background flex flex-col">
-      {/* Navigation */}
-      <nav className="w-full px-6 py-5 flex items-center justify-between">
-        <motion.div 
-          initial={{ opacity: 0, x: -20 }}
-          animate={{ opacity: 1, x: 0 }}
-          transition={{ duration: 0.5 }}
-          className="text-xl font-semibold text-foreground tracking-tight"
-        >
-          Brand
-        </motion.div>
-        <motion.div 
-          initial={{ opacity: 0, x: 20 }}
-          animate={{ opacity: 1, x: 0 }}
-          transition={{ duration: 0.5 }}
-          className="flex items-center gap-8"
-        >
-          <a href="#" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
-            About
-          </a>
-          <a href="#" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
-            Contact
-          </a>
-        </motion.div>
-      </nav>
-
-      {/* Hero Section */}
-      <main className="flex-1 flex items-center justify-center px-6">
-        <div className="max-w-3xl mx-auto text-center">
-          <motion.h1 
-            initial={{ opacity: 0, y: 30 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.7, delay: 0.2 }}
-            className="text-5xl md:text-7xl font-light text-foreground tracking-tight leading-tight"
-          >
-            Start building
-            <span className="block text-muted-foreground">something beautiful</span>
-          </motion.h1>
-          
-          <motion.p 
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6, delay: 0.4 }}
-            className="mt-8 text-lg text-muted-foreground max-w-xl mx-auto"
-          >
-            A blank canvas for your next project. Clean, minimal, and ready for your ideas.
-          </motion.p>
-
-          <motion.div 
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6, delay: 0.6 }}
-            className="mt-12 flex items-center justify-center gap-4"
-          >
-            <button className="px-8 py-3 bg-foreground text-background rounded-full text-sm font-medium hover:opacity-90 transition-opacity">
-              Get Started
-            </button>
-            <button className="px-8 py-3 border border-border text-foreground rounded-full text-sm font-medium hover:bg-secondary transition-colors">
-              Learn More
-            </button>
-          </motion.div>
+    <AppLayout>
+      <div className="space-y-6">
+        {/* Header */}
+        <div className="flex items-start justify-between">
+          <div>
+            <h1 className="text-2xl font-semibold">Appels d'Offres</h1>
+            <p className="text-muted-foreground text-sm mt-1">
+              {totalCount} appel{totalCount !== 1 ? 's' : ''} d'offres analysé{totalCount !== 1 ? 's' : ''}
+            </p>
+          </div>
         </div>
-      </main>
 
-      {/* Footer */}
-      <footer className="w-full px-6 py-6">
-        <motion.p 
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ duration: 0.5, delay: 0.8 }}
-          className="text-center text-sm text-muted-foreground"
-        >
-          © 2026 Brand. All rights reserved.
-        </motion.p>
-      </footer>
-    </div>
+        {/* Search & Filters */}
+        <form onSubmit={handleSearch} className="flex gap-3">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+            <Input
+              type="text"
+              placeholder="Rechercher par référence, sujet, organisme..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-10"
+            />
+          </div>
+          <Button type="submit" variant="secondary">
+            <Filter className="w-4 h-4 mr-2" />
+            Filtrer
+          </Button>
+        </form>
+
+        {/* Error State */}
+        {error && (
+          <div className="data-card text-center py-8 border-destructive/50">
+            <FileText className="w-10 h-10 text-destructive mx-auto mb-3" />
+            <p className="text-destructive font-medium">Erreur de chargement</p>
+            <p className="text-muted-foreground text-sm mt-1">
+              {error instanceof Error ? error.message : 'Une erreur est survenue'}
+            </p>
+          </div>
+        )}
+
+        {/* Tender Table */}
+        {!error && (
+          <TenderTable tenders={tenders} isLoading={isLoading} />
+        )}
+      </div>
+    </AppLayout>
   );
-};
-
-export default Index;
+}

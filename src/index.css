@@ -1,89 +1,82 @@
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700;800&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-/* Definition of the design system. All colors, gradients, fonts, etc should be defined here. 
-All colors MUST be HSL.
-*/
+/* TENDER AI — Industrial Dark Theme 
+   Backend-first data platform aesthetic
+   Colors in HSL format */
 
 @layer base {
   :root {
-    --background: 40 20% 98%;
-    --foreground: 30 10% 12%;
+    /* Core backgrounds - deep industrial navy */
+    --background: 222 47% 6%;
+    --foreground: 210 20% 95%;
 
-    --card: 40 25% 96%;
-    --card-foreground: 30 10% 12%;
+    /* Card surfaces - slightly elevated */
+    --card: 222 47% 8%;
+    --card-foreground: 210 20% 95%;
 
-    --popover: 40 20% 98%;
-    --popover-foreground: 30 10% 12%;
+    /* Popovers and dialogs */
+    --popover: 222 47% 10%;
+    --popover-foreground: 210 20% 95%;
 
-    --primary: 30 10% 12%;
-    --primary-foreground: 40 20% 98%;
+    /* Primary - electric cyan (data/active states) */
+    --primary: 187 100% 50%;
+    --primary-foreground: 222 47% 6%;
 
-    --secondary: 40 15% 94%;
-    --secondary-foreground: 30 10% 12%;
+    /* Secondary - muted steel */
+    --secondary: 215 25% 15%;
+    --secondary-foreground: 210 20% 80%;
 
-    --muted: 40 10% 90%;
-    --muted-foreground: 30 5% 45%;
+    /* Muted elements */
+    --muted: 215 20% 12%;
+    --muted-foreground: 215 15% 55%;
 
-    --accent: 25 80% 55%;
-    --accent-foreground: 40 20% 98%;
+    /* Accent - warm amber (warnings, highlights) */
+    --accent: 36 95% 55%;
+    --accent-foreground: 222 47% 6%;
 
-    --destructive: 0 84% 60%;
-    --destructive-foreground: 40 20% 98%;
+    /* Status colors */
+    --success: 145 80% 45%;
+    --success-foreground: 145 80% 10%;
+    --warning: 36 95% 55%;
+    --warning-foreground: 36 95% 10%;
+    --destructive: 0 72% 55%;
+    --destructive-foreground: 0 0% 100%;
 
-    --border: 40 15% 88%;
-    --input: 40 15% 88%;
-    --ring: 25 80% 55%;
+    /* Borders and inputs */
+    --border: 215 25% 18%;
+    --input: 215 25% 15%;
+    --ring: 187 100% 50%;
 
-    --radius: 0.75rem;
+    --radius: 0.5rem;
 
-    --sidebar-background: 40 20% 96%;
-    --sidebar-foreground: 30 10% 25%;
-    --sidebar-primary: 30 10% 12%;
-    --sidebar-primary-foreground: 40 20% 98%;
-    --sidebar-accent: 40 15% 92%;
-    --sidebar-accent-foreground: 30 10% 12%;
-    --sidebar-border: 40 15% 88%;
-    --sidebar-ring: 25 80% 55%;
+    /* Status badge colors */
+    --status-listed: 215 80% 55%;
+    --status-analyzed: 145 80% 45%;
+    --status-pending: 36 95% 55%;
+    --status-error: 0 72% 55%;
+
+    /* Sidebar */
+    --sidebar-background: 222 47% 5%;
+    --sidebar-foreground: 210 20% 80%;
+    --sidebar-primary: 187 100% 50%;
+    --sidebar-primary-foreground: 222 47% 6%;
+    --sidebar-accent: 215 25% 12%;
+    --sidebar-accent-foreground: 210 20% 95%;
+    --sidebar-border: 215 25% 15%;
+    --sidebar-ring: 187 100% 50%;
+
+    /* Data table */
+    --table-header: 222 47% 10%;
+    --table-row-hover: 215 25% 12%;
+    --table-border: 215 25% 15%;
   }
 
   .dark {
-    --background: 30 10% 8%;
-    --foreground: 40 20% 95%;
-
-    --card: 30 10% 12%;
-    --card-foreground: 40 20% 95%;
-
-    --popover: 30 10% 8%;
-    --popover-foreground: 40 20% 95%;
-
-    --primary: 40 20% 95%;
-    --primary-foreground: 30 10% 8%;
-
-    --secondary: 30 8% 18%;
-    --secondary-foreground: 40 20% 95%;
-
-    --muted: 30 8% 22%;
-    --muted-foreground: 40 10% 60%;
-
-    --accent: 25 80% 55%;
-    --accent-foreground: 40 20% 98%;
-
-    --destructive: 0 62% 30%;
-    --destructive-foreground: 40 20% 95%;
-
-    --border: 30 8% 20%;
-    --input: 30 8% 20%;
-    --ring: 25 80% 55%;
-    --sidebar-background: 30 10% 8%;
-    --sidebar-foreground: 40 20% 95%;
-    --sidebar-primary: 25 80% 55%;
-    --sidebar-primary-foreground: 40 20% 98%;
-    --sidebar-accent: 30 8% 18%;
-    --sidebar-accent-foreground: 40 20% 95%;
-    --sidebar-border: 30 8% 20%;
-    --sidebar-ring: 25 80% 55%;
+    /* Already dark by default */
   }
 }
 
@@ -92,7 +85,71 @@ All colors MUST be HSL.
     @apply border-border;
   }
 
+  html {
+    @apply antialiased;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground font-sans;
+  }
+
+  /* Code/data blocks use monospace */
+  code, pre, .font-mono {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+  }
+}
+
+@layer components {
+  /* Status badges */
+  .badge-listed {
+    @apply bg-[hsl(var(--status-listed)/0.15)] text-[hsl(var(--status-listed))] border border-[hsl(var(--status-listed)/0.3)];
+  }
+  
+  .badge-analyzed {
+    @apply bg-[hsl(var(--success)/0.15)] text-[hsl(var(--success))] border border-[hsl(var(--success)/0.3)];
+  }
+  
+  .badge-pending {
+    @apply bg-[hsl(var(--warning)/0.15)] text-[hsl(var(--warning))] border border-[hsl(var(--warning)/0.3)];
+  }
+  
+  .badge-error {
+    @apply bg-[hsl(var(--destructive)/0.15)] text-[hsl(var(--destructive))] border border-[hsl(var(--destructive)/0.3)];
+  }
+
+  /* Data cards */
+  .data-card {
+    @apply bg-card border border-border rounded-lg p-4 transition-all duration-200;
+  }
+  
+  .data-card:hover {
+    @apply border-primary/30 shadow-lg shadow-primary/5;
+  }
+
+  /* Terminal/log styling */
+  .terminal {
+    @apply bg-[hsl(222,47%,4%)] border border-border rounded-lg font-mono text-sm;
+  }
+
+  .terminal-header {
+    @apply flex items-center gap-2 px-4 py-2 border-b border-border bg-[hsl(222,47%,6%)];
+  }
+
+  .terminal-dot {
+    @apply w-3 h-3 rounded-full;
+  }
+
+  /* Stat cards */
+  .stat-card {
+    @apply bg-card border border-border rounded-lg p-4 flex flex-col gap-1;
+  }
+
+  .stat-value {
+    @apply text-2xl font-bold font-mono;
+  }
+
+  .stat-label {
+    @apply text-sm text-muted-foreground;
   }
 }

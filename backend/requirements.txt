@@ -1,0 +1,46 @@
+# Tender AI Platform - Python Backend Dependencies
+# Compatible with Python 3.11, 3.12, 3.13
+
+# Web Framework
+fastapi>=0.109.2
+uvicorn>=0.27.1  # (no [standard] extras to avoid compilation on Windows)
+python-multipart>=0.0.9
+
+# Database
+sqlalchemy>=2.0.25
+psycopg2-binary>=2.9.9
+alembic>=1.13.1
+
+# Async
+aiofiles>=23.2.1
+httpx>=0.26.0
+
+# Scraping
+playwright>=1.41.2
+
+# Document Processing
+pypdf>=4.0.1
+python-docx>=1.1.0
+openpyxl>=3.1.2
+pandas>=2.2.3
+pymupdf>=1.25.0  # Pre-built wheels for Python 3.13
+
+# OCR - Tesseract
+pytesseract>=0.3.10
+pdf2image>=1.17.0
+Pillow>=10.0.0
+requests>=2.31.0
+
+# AI
+openai>=1.12.0  # DeepSeek uses OpenAI-compatible API
+
+# Utilities
+python-dotenv>=1.0.1
+pydantic>=2.9.0
+pydantic-settings>=2.5.0
+
+# Scheduling
+apscheduler>=3.10.4
+
+# Logging
+loguru>=0.7.2

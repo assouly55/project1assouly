@@ -1,0 +1,17 @@
+Sélectionne max 5 articles pertinents pour la question.
+
+FORMAT ENTRÉE: DOCUMENT|NUMERO|TITRE (1 par ligne)
+
+PRIORITÉ: CPS > RC > ANNEXE > AVIS
+
+SORTIE JSON:
+```json
+{
+  "selected_articles": [
+    {"document": "CPS", "article_number": "15"}
+  ],
+  "confidence": "high"
+}
+```
+
+Si aucun pertinent: {"selected_articles": [], "confidence": "low"}

@@ -1,0 +1,1390 @@
+{
+  "Fournitures": [
+    {
+      "name": "Produits alimentaires, d’élevage, de la pêche, d’agriculture, d’horticulture et pépinière",
+      "subcategories": [
+        {
+          "name": "Produits alimentaires pour usage animal",
+          "items": [
+            "Aliments composés pour bétail",
+            "Granulés pour volailles",
+            "Aliments pour poissons d'élevage",
+            "Nourriture pour animaux de compagnie (chiens, chats)",
+            "Suppléments vitaminiques et minéraux pour animaux",
+            "Fourrage et ensilage",
+            "Aliments pour animaux de laboratoire"
+          ]
+        },
+        {
+          "name": "Produits alimentaires pour usage humain",
+          "items": [
+            "Céréales et dérivés (riz, blé, maïs)",
+            "Légumineuses (haricots, lentilles, pois)",
+            "Fruits et légumes frais ou transformés",
+            "Produits laitiers (lait, fromage, yaourt)",
+            "Viandes et produits carnés",
+            "Produits de boulangerie et pâtisserie",
+            "Conserves et produits emballés",
+            "Épices et condiments"
+          ]
+        },
+        {
+          "name": "Engrais et composés azotés",
+          "items": [
+            "Engrais NPK (azote, phosphore, potassium)",
+            "Urée",
+            "Nitrate d'ammonium",
+            "Engrais organiques (fumier, compost)",
+            "Engrais foliaires",
+            "Amendements calcaires",
+            "Engrais solubles pour irrigation"
+          ]
+        },
+        {
+          "name": "Plantes, végétaux, graines, plants et autres produits de pépinière connexes",
+          "items": [
+            "Plants d'arbres fruitiers",
+            "Plants forestiers",
+            "Plantes ornementales",
+            "Semences certifiées de céréales",
+            "Bulbes et rhizomes",
+            "Plants de légumes",
+            "Terreaux et substrats de culture",
+            "Produits de greffage"
+          ]
+        },
+        {
+          "name": "Plantes à usage spécifique (pharmacie, insecticide, parfumerie)",
+          "items": [
+            "Plantes médicinales (menthe, camomille, aloès)",
+            "Plantes aromatiques (lavande, thym, romarin)",
+            "Plantes insecticides (neem, pyrèthre)",
+            "Plantes pour extraits cosmétiques",
+            "Plantes pour teintures naturelles"
+          ]
+        },
+        {
+          "name": "Portoirs destinés à l'élevage de plants",
+          "items": [
+            "Plateaux alvéolés (plaqueuses)",
+            "Caisses de germination",
+            "Serres tunnel",
+            "Bancs de culture",
+            "Systèmes hydroponiques",
+            "Supports pour pots"
+          ]
+        },
+        {
+          "name": "Caoutchouc naturel, latex naturel et produits connexes",
+          "items": [
+            "Latex concentré",
+            "Caoutchouc en feuilles",
+            "Granulés de caoutchouc",
+            "Latex pour gants médicaux",
+            "Caoutchouc crêpé",
+            "Émulsions de latex"
+          ]
+        },
+        {
+          "name": "Produits de la minoterie, amidon et produits amylacés",
+          "items": [
+            "Farines de céréales (blé, maïs, seigle)",
+            "Semoules",
+            "Amidon de maïs, blé, pomme de terre",
+            "Fécule",
+            "Produits de malt",
+            "Mélanges pour boulangerie"
+          ]
+        },
+        {
+          "name": "Produits de la pêche et de l'aquaculture (poissons, crustacés...)",
+          "items": [
+            "Poissons frais/entiers (tilapia, carpe, sardine)",
+            "Poissons transformés (filets, fumés)",
+            "Crustacés (crevettes, crabes)",
+            "Mollusques (huîtres, moules)",
+            "Produits congelés",
+            "Algues marines comestibles"
+          ]
+        },
+        {
+          "name": "Animaux vivants (bétail, cheptel...)",
+          "items": [
+            "Bovins (vaches, taureaux, veaux)",
+            "Ovins (moutons, brebis)",
+            "Caprins (chèvres)",
+            "Porcins",
+            "Volailles (poulets, canards, dindes)",
+            "Animaux de reproduction"
+          ]
+        },
+        {
+          "name": "Produits d'exploitation forestière (Bois, grume, gomme, pâte à papier...)",
+          "items": [
+            "Grumes de bois d'œuvre",
+            "Bois de chauffage",
+            "Bois rond pour industrie",
+            "Gomme arabique",
+            "Pâte à papier",
+            "Bois énergie",
+            "Écorces pour paillage"
+          ]
+        },
+        {
+          "name": "Insectes",
+          "items": [
+            "Abeilles pour apiculture",
+            "Vers à soie",
+            "Insectes auxiliaires pour lutte biologique",
+            "Insectes pour alimentation animale",
+            "Collection d'insectes pour étude"
+          ]
+        },
+        {
+          "name": "Huiles et graisses animales ou végétales",
+          "items": [
+            "Huiles végétales (palme, tournesol, olive)",
+            "Graisses animales (saindoux, suif)",
+            "Huiles pour biodiesel",
+            "Huiles techniques",
+            "Margarines industrielles",
+            "Huiles essentielles"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Produits pétroliers, carburants, lubrifiants et produits de chauffage",
+      "subcategories": [
+        {
+          "name": "Combustibles et produits de chauffage (charbon, bois de chauffage, fuel, gaz...)",
+          "items": [
+            "Charbon minéral",
+            "Briquettes de charbon",
+            "Bois de chauffage en stères",
+            "Pellets de bois",
+            "Fioul domestique",
+            "Fioul lourd",
+            "Gaz naturel comprimé (GNC)",
+            "Bouteilles de gaz domestiques"
+          ]
+        },
+        {
+          "name": "Carburant et autres produits pétroliers connexes",
+          "items": [
+            "Essence (sans plomb, super)",
+            "Gazole/diesel",
+            "Kérosène (aviation)",
+            "Carburéacteur",
+            "Pétrole lampant",
+            "Additifs pour carburants"
+          ]
+        },
+        {
+          "name": "Lubrifiants, liquide à usage hydraulique et autres préparations lubrifiantes",
+          "items": [
+            "Huiles moteur (minérales, synthétiques)",
+            "Graisses industrielles",
+            "Huiles hydrauliques",
+            "Huiles de transmission",
+            "Huiles de trempe",
+            "Pâtes lubrifiantes"
+          ]
+        },
+        {
+          "name": "Gaz divers (Propane, butane, gaz manufacturé...)",
+          "items": [
+            "Propane en bouteilles",
+            "Butane en bouteilles",
+            "Gaz industriels (oxygène, azote, acétylène)",
+            "Gaz réfrigérants",
+            "Gaz médicaux",
+            "Gaz pour soudure"
+          ]
+        },
+        {
+          "name": "Vapeur, eau chaude et produits connexes",
+          "items": [
+            "Vapeur industrielle",
+            "Eau chaude sanitaire",
+            "Eau surchauffée",
+            "Condensats",
+            "Systèmes de distribution de vapeur"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Produits chimiques, de nettoyage, insecticides",
+      "subcategories": [
+        {
+          "name": "Emulsions de bitumes, liants hydrocarbonés et autres matériaux enrobés",
+          "items": [
+            "Émulsion de bitume routier",
+            "Bitume fluidifié",
+            "Bitume oxydé",
+            "Liants hydrocarbonés",
+            "Enduits superficiels",
+            "Produits d'étanchéité"
+          ]
+        },
+        {
+          "name": "Additifs pour ciment, mortier ou béton et autres additifs chimiques similaires",
+          "items": [
+            "Adjuvants pour béton (plastifiants, retardateurs)",
+            "Accélérateurs de prise",
+            "Hydrofuges",
+            "Fibres de renforcement",
+            "Colorants pour béton",
+            "Antigels"
+          ]
+        },
+        {
+          "name": "Colorants et pigments",
+          "items": [
+            "Pigments minéraux",
+            "Colorants organiques",
+            "Colorants alimentaires",
+            "Encres colorées",
+            "Pigments pour peintures",
+            "Colorants pour textiles"
+          ]
+        },
+        {
+          "name": "Détergents et produits de nettoyage",
+          "items": [
+            "Détergents pour sols",
+            "Nettoyants multi-surfaces",
+            "Produits pour vitres",
+            "Détergents industriels",
+            "Savons et détergents en poudre",
+            "Nettoyants sanitaires"
+          ]
+        },
+        {
+          "name": "Produits d'hygiènes et de désinfection",
+          "items": [
+            "Désinfectants (chlore, alcool, ammonium quaternaire)",
+            "Savons antibactériens",
+            "Gels hydroalcooliques",
+            "Produits de stérilisation",
+            "Désodorisants",
+            "Insectifuges"
+          ]
+        },
+        {
+          "name": "Insecticides, pesticides et phytosanitaires",
+          "items": [
+            "Insecticides agricoles",
+            "Herbicides sélectifs et totaux",
+            "Fongicides",
+            "Rodenticides",
+            "Nématicides",
+            "Répulsifs insectes"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Matières premières et produits de textile, cuir, caoutchouc et plastique",
+      "subcategories": [
+        {
+          "name": "Cuir et produits connexes",
+          "items": [
+            "Cuirs bruts (bovins, ovins)",
+            "Cuirs tannés",
+            "Peaux finies",
+            "Découpes de cuir",
+            "Cuirs techniques",
+            "Accessoires en cuir (boucles, rivets)"
+          ]
+        },
+        {
+          "name": "Coton, laine et produits connexes",
+          "items": [
+            "Balles de coton brut",
+            "Fils de coton",
+            "Laine lavée",
+            "Fibres synthétiques (polyester, nylon)",
+            "Fibres mélangées",
+            "Ouates et bourres"
+          ]
+        },
+        {
+          "name": "Caoutchouc et fibres synthétiques",
+          "items": [
+            "Caoutchouc synthétique (SBR, néoprène)",
+            "Élastomères",
+            "Fibres élastiques (élasthanne)",
+            "Mousses de caoutchouc",
+            "Rubans élastiques",
+            "Colles à base de caoutchouc"
+          ]
+        },
+        {
+          "name": "Fil textile naturel ou artificiel et produits connexes",
+          "items": [
+            "Fils à coudre",
+            "Fils à tricoter",
+            "Fils techniques",
+            "Bobines de fil",
+            "Fils décoratifs",
+            "Fils pour broderie"
+          ]
+        },
+        {
+          "name": "Produits en caoutchouc et en plastique",
+          "items": [
+            "Tuyaux et tubes",
+            "Jointures et joints",
+            "Gants techniques",
+            "Bandes transporteuses",
+            "Pièces moulées",
+            "Feuilles et plaques"
+          ]
+        },
+        {
+          "name": "Produits textiles",
+          "items": [
+            "Tissus en rouleaux",
+            "Toiles techniques",
+            "Non-tissés",
+            "Tapis et moquettes",
+            "Textiles industriels",
+            "Textiles d'ameublement"
+          ]
+        },
+        {
+          "name": "Sacs et produits d'emballage",
+          "items": [
+            "Sacs en polyéthylène",
+            "Sacs en papier",
+            "Big-bags",
+            "Sacs isothermes",
+            "Sacs sous vide",
+            "Emballages souples"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Effets d'habillement et accessoires",
+      "subcategories": [
+        {
+          "name": "Vêtements professionnels",
+          "items": [
+            "Bleus de travail",
+            "Tenues de protection (anti-feu, chimique)",
+            "Uniforms de service",
+            "Vêtements haute visibilité",
+            "Tenues alimentaires",
+            "Combinaisons techniques"
+          ]
+        },
+        {
+          "name": "Vêtements de sport",
+          "items": [
+            "Maillots et shorts",
+            "Survêtements",
+            "Vêtements de fitness",
+            "Tenues de ski",
+            "Maillots de bain",
+            "Vêtements de randonnée"
+          ]
+        },
+        {
+          "name": "Tenues militaires, paramilitaires et d'autre corps similaires",
+          "items": [
+            "Uniforms de camouflage",
+            "Tenues de cérémonie",
+            "Équipements tactiques",
+            "Bérets et casquettes",
+            "Insignes et galons",
+            "Ceinturons et baudriers"
+          ]
+        },
+        {
+          "name": "Articles chaussants",
+          "items": [
+            "Chaussures de sécurité",
+            "Bottes de travail",
+            "Chaussures de sport",
+            "Sandales",
+            "Chaussures de cérémonie",
+            "Chaussures médicales"
+          ]
+        },
+        {
+          "name": "Accessoires d'habillement",
+          "items": [
+            "Cravates et nœuds papillon",
+            "Ceintures",
+            "Foulards et écharpes",
+            "Gants et mitaines",
+            "Chapeaux et casquettes",
+            "Bijoux de mode"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Matériel et articles de sport, médailles, effigies et drapeaux",
+      "subcategories": [
+        {
+          "name": "Matériel de sport",
+          "items": [
+            "Ballons (football, basket, volley)",
+            "Raquettes (tennis, badminton)",
+            "Bâtons de golf",
+            "Équipements de gym (haltères, tapis)",
+            "Filets et poteaux",
+            "Équipements aquatiques"
+          ]
+        },
+        {
+          "name": "Articles de sport",
+          "items": [
+            "Protections (casques, genouillères)",
+            "Montres de sport",
+            "Accessoires de fitness",
+            "Sifflets et chronomètres",
+            "Bouteilles d'eau",
+            "Sacs de sport"
+          ]
+        },
+        {
+          "name": "Médaille",
+          "items": [
+            "Médailles sportives",
+            "Médailles commémoratives",
+            "Médailles militaires",
+            "Médailles religieuses",
+            "Rubans et barrettes",
+            "Écrins à médailles"
+          ]
+        },
+        {
+          "name": "Effigies",
+          "items": [
+            "Bustes et statues",
+            "Portraits officiels",
+            "Figurines commémoratives",
+            "Emblèmes sculptés",
+            "Plaques nominatives",
+            "Reproductions artistiques"
+          ]
+        },
+        {
+          "name": "Drapeaux et fanions",
+          "items": [
+            "Drapeaux nationaux",
+            "Pavillons officiels",
+            "Banderoles et oriflammes",
+            "Fanions de voiture",
+            "Drapeaux de signalisation",
+            "Mâts et supports"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Objets d'art, articles artistiques, de divertissement et de médiathèque",
+      "subcategories": [
+        {
+          "name": "Objets d'art (Tableau, sculpture...)",
+          "items": [
+            "Peintures sur toile",
+            "Sculptures en bronze",
+            "Estampes et gravures",
+            "Céramiques artistiques",
+            "Photographies d'art",
+            "Installations contemporaines"
+          ]
+        },
+        {
+          "name": "Pièces et accessoires pour les instruments de musique",
+          "items": [
+            "Cordes pour guitare/violon",
+            "Anches pour instruments à vent",
+            "Peaux pour tambours",
+            "Clés et mécanismes",
+            "Étuis et housses",
+            "Supports et pupitres"
+          ]
+        },
+        {
+          "name": "Articles et accessoires de peinture artistique",
+          "items": [
+            "Tubes de peinture (huile, acrylique)",
+            "Pinceaux de différentes tailles",
+            "Toiles et châssis",
+            "Palettes et godets",
+            "Médiums et vernis",
+            "Chevalets"
+          ]
+        },
+        {
+          "name": "Films, CD musical et livres audio et autres articles similaires",
+          "items": [
+            "DVD et Blu-ray",
+            "CD audio",
+            "Livres audio (CD ou téléchargement)",
+            "Cassettes audio",
+            "Vinyles",
+            "Contenus numériques"
+          ]
+        },
+        {
+          "name": "Bandes magnétiques et fournitures pour équipements de production vidéo",
+          "items": [
+            "Cassettes vidéo professionnelles",
+            "Bandes de montage",
+            "Disques durs pour stockage vidéo",
+            "Cartes mémoire professionnelles",
+            "Câbles de connexion audiovisuels",
+            "Supports d'archivage"
+          ]
+        },
+        {
+          "name": "Instruments de musique",
+          "items": [
+            "Pianos et claviers",
+            "Guitares et basses",
+            "Instruments à vent (flûtes, saxophones)",
+            "Batteries et percussions",
+            "Instruments à cordes (violons, violoncelles)",
+            "Instruments traditionnels"
+          ]
+        },
+        {
+          "name": "Jouets",
+          "items": [
+            "Jouets éducatifs",
+            "Jeux de société",
+            "Poupées et figurines",
+            "Jouets de construction",
+            "Jouets électroniques",
+            "Jouets en bois"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Imprimés, produits d'impression, de reproduction, et de photographie",
+      "subcategories": [
+        {
+          "name": "Badges, articles similaires et accessoires",
+          "items": [
+            "Badges d'identification",
+            "Cartes magnétiques",
+            "Étiquettes nominatives",
+            "Pin's et écussons",
+            "Porte-badges",
+            "Systèmes de fabrication de badges"
+          ]
+        },
+        {
+          "name": "Produits d'impression, de reproduction et de photographie",
+          "items": [
+            "Livres et brochures",
+            "Affiches et posters",
+            "Cartes géographiques",
+            "Reproductions d'œuvres d'art",
+            "Photos agrandies",
+            "Plans techniques"
+          ]
+        },
+        {
+          "name": "Consommables d'impression et de reproduction (encre, plaques...)",
+          "items": [
+            "Cartouches d'encre",
+            "Toners laser",
+            "Plaques offset",
+            "Papiers spéciaux (photo, glacé)",
+            "Tambours d'imprimante",
+            "Rouleaux de cire pour fax"
+          ]
+        },
+        {
+          "name": "Cartes (visite, de vœux, d'invitation...)",
+          "items": [
+            "Cartes de visite",
+            "Cartes de vœux",
+            "Faire-part",
+            "Cartes d'invitation",
+            "Cartes de fidélité",
+            "Cartes postales"
+          ]
+        },
+        {
+          "name": "Imprimés",
+          "items": [
+            "Formulaires administratifs",
+            "Cahiers et carnets",
+            "Bloc-notes",
+            "Papeterie officielle",
+            "Étiquettes et tickets",
+            "Certificats et diplômes"
+          ]
+        },
+        {
+          "name": "Fournitures et accessoires des équipements de photographie",
+          "items": [
+            "Filtres d'objectif",
+            "Trépieds et monopodes",
+            "Flashs et éclairages",
+            "Sacoches et étuis",
+            "Nettoyants pour optique",
+            "Batteries pour appareils photo"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Equipements et produits médicaux, pharmaceutiques et de laboratoire",
+      "subcategories": [
+        {
+          "name": "Equipements et fournitures pour imagerie médicale",
+          "items": [
+            "Appareils de radiographie",
+            "Écrans radiosensibles",
+            "Produits de contraste",
+            "Cassettes pour radiologie",
+            "Analyseurs d'images",
+            "Équipements d'échographie"
+          ]
+        },
+        {
+          "name": "Equipements et matériel médical, médico-technique et biomédical",
+          "items": [
+            "Lits médicaux",
+            "Monitoring patient",
+            "Ventilateurs",
+            "Défibrillateurs",
+            "Pompes à perfusion",
+            "Stérilisateurs"
+          ]
+        },
+        {
+          "name": "Articles de correction de la vue et articles connexes",
+          "items": [
+            "Lunettes correctrices",
+            "Lentilles de contact",
+            "Solutions d'entretien",
+            "Étuis à lunettes",
+            "Chiffons de nettoyage",
+            "Montures diverses"
+          ]
+        },
+        {
+          "name": "Articles et prothèses pour les handicapés",
+          "items": [
+            "Fauteuils roulants",
+            "Déambulateurs",
+            "Prothèses auditives",
+            "Orthèses",
+            "Aides à la marche",
+            "Équipements adaptés"
+          ]
+        },
+        {
+          "name": "Pièces de rechange des équipements médicaux, médico-techniques et biomédical",
+          "items": [
+            "Capteurs et sondes",
+            "Câbles de connexion",
+            "Piles et batteries",
+            "Pièces mécaniques",
+            "Circuits imprimés",
+            "Éléments de filtration"
+          ]
+        },
+        {
+          "name": "Fongibles et consommables médicaux",
+          "items": [
+            "Seringues et aiguilles",
+            "Gants médicaux",
+            "Compresses et pansements",
+            "Champs opératoires",
+            "Sutures",
+            "Cathéters"
+          ]
+        },
+        {
+          "name": "Matières premières pharmaceutiques",
+          "items": [
+            "Principes actifs",
+            "Excipients",
+            "Substances de référence",
+            "Produits chimiques pharmaceutiques",
+            "Extraits végétaux",
+            "Poudres de plantes médicinales",
+            "Aromates pour pharmacie"
+          ]
+        },
+        {
+          "name": "Médicaments et produits pharmaceutiques et parapharmaceutiques",
+          "items": [
+            "Médicaments génériques",
+            "Spécialités pharmaceutiques",
+            "Vaccins",
+            "Produits de santé naturels",
+            "Produits de diagnostic",
+            "Dispositifs médicaux de thérapie"
+          ]
+        },
+        {
+          "name": "Consommables et réactifs de laboratoire pour analyses physico-chimiques, bactériologiques, microbiologiques et toxicologiques y compris verreries",
+          "items": [
+            "Réactifs de chimie clinique",
+            "Milieux de culture bactériologique",
+            "Kits de test ELISA",
+            "Tubes à essai et éprouvettes",
+            "Pipettes et embouts jetables",
+            "Plaques de microtitration",
+            "Verrerie de laboratoire (béchers, fioles)",
+            "Réactifs pour analyses toxicologiques"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Matériaux de construction, plomberie, quincaillerie et outillages",
+      "subcategories": [
+        {
+          "name": "Matériaux de construction",
+          "items": [
+            "Ciment",
+            "Mortier",
+            "Briques",
+            "Parpaings",
+            "Acier de construction",
+            "Bois de charpente",
+            "Isolants thermiques",
+            "Tuiles et ardoises",
+            "Béton prêt à l'emploi",
+            "Matériaux de façade"
+          ]
+        },
+        {
+          "name": "Articles et fournitures de plomberie",
+          "items": [
+            "Tuyaux (PVC, cuivre, PEX)",
+            "Robinetterie (robinets, mitigeurs)",
+            "Éviers et lavabos",
+            "WC et cuvettes",
+            "Systèmes de drainage",
+            "Pompes et surpresseurs",
+            "Réservoirs et chauffe-eau",
+            "Raccords et joints"
+          ]
+        },
+        {
+          "name": "Articles et fournitures de quincaillerie",
+          "items": [
+            "Vis, boulons et écrous",
+            "Charnières et paumelles",
+            "Serrurerie (serrures, cylindres)",
+            "Cadenas et antivols",
+            "Étagères et supports muraux",
+            "Gonds et pentures",
+            "Câbles et chaînes",
+            "Quincaillerie de meuble"
+          ]
+        },
+        {
+          "name": "Outillages",
+          "items": [
+            "Outils à main (marteaux, tournevis, clés)",
+            "Outils électroportatifs (perceuses, visseuses)",
+            "Outils de mesure (mètres, niveaux)",
+            "Équipements de protection (casques, gants)",
+            "Outils de jardinage (bêches, râteaux)",
+            "Matériel de peinture (rouleaux, pinceaux)",
+            "Outils de coupe (scies, ciseaux)"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Documentation, manuels, fournitures scolaires et d'enseignement",
+      "subcategories": [
+        {
+          "name": "Manuels scolaires et d'enseignement",
+          "items": [
+            "Livres de cours",
+            "Cahiers d'exercices",
+            "Guides pédagogiques",
+            "Manuels techniques",
+            "Ouvrages de référence",
+            "Livres spécialisés",
+            "Recueils de textes",
+            "Atlas et encyclopédies"
+          ]
+        },
+        {
+          "name": "fournitures scolaires et d'enseignement",
+          "items": [
+            "Cahiers et carnets",
+            "Stylos et crayons",
+            "Règles et compas",
+            "Calculatrices",
+            "Matériel de géométrie",
+            "Articles de bureau",
+            "Gommes et correcteurs",
+            "Classeurs et chemises"
+          ]
+        },
+        {
+          "name": "Documentation",
+          "items": [
+            "Brochures et dépliants",
+            "Rapports techniques",
+            "Catalogues produits",
+            "Documentation juridique",
+            "Guides d'utilisation",
+            "Publications officielles",
+            "Manuels d'entretien",
+            "Documentation d'installation"
+          ]
+        },
+        {
+          "name": "Données climatologiques, et autres données techniques similaires",
+          "items": [
+            "Données météorologiques",
+            "Cartes climatiques",
+            "Statistiques environnementales",
+            "Données satellitaires",
+            "Rapports d'analyse",
+            "Bases de données",
+            "Archives climatiques",
+            "Prévisions météorologiques"
+          ]
+        },
+        {
+          "name": "Cartes géologiques et géographiques",
+          "items": [
+            "Cartes topographiques",
+            "Cartes géologiques",
+            "Cartes hydrologiques",
+            "Cartes pédologiques",
+            "Plans cadastraux",
+            "Cartes thématiques",
+            "Globes terrestres",
+            "Cartes numériques"
+          ]
+        },
+        {
+          "name": "Photographies aériennes",
+          "items": [
+            "Photos aériennes verticales",
+            "Photos obliques",
+            "Orthophotoplans",
+            "Images satellitaires",
+            "Photos infrarouges",
+            "Séries temporelles",
+            "Photogrammétrie",
+            "Cartes photomosaïques"
+          ]
+        },
+        {
+          "name": "Cartes topographiques",
+          "items": [
+            "Cartes à grande échelle",
+            "Cartes de randonnée",
+            "Cartes militaires",
+            "Cartes de navigation",
+            "Cartes de relief",
+            "Cartes numérisées",
+            "Cartes thématiques topographiques"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Matériel informatique, logiciels et pièces de rechanges",
+      "subcategories": [
+        {
+          "name": "Logiciels utilitaires, middlewares, sécurités, messageries, collaboration et autres",
+          "items": [
+            "Antivirus et logiciels de sécurité",
+            "Systèmes d'exploitation (Windows, Linux)",
+            "Middleware d'intégration",
+            "Outils de collaboration (Teams, Slack)",
+            "Logiciels de sauvegarde",
+            "Utilitaires système",
+            "Logiciels de virtualisation",
+            "Solutions de messagerie (Exchange)"
+          ]
+        },
+        {
+          "name": "Progiciels",
+          "items": [
+            "ERP (SAP, Oracle)",
+            "CRM (Salesforce)",
+            "Logiciels de comptabilité",
+            "Logiciels de gestion de projet",
+            "Systèmes de gestion d'entrepôt",
+            "Logiciels de paie",
+            "Logiciels de facturation",
+            "Suites bureautiques (Microsoft Office)"
+          ]
+        },
+        {
+          "name": "Matériel et équipements informatiques",
+          "items": [
+            "Ordinateurs de bureau",
+            "Ordinateurs portables",
+            "Serveurs et racks",
+            "Tablettes",
+            "Imprimantes et scanners",
+            "Moniteurs et écrans",
+            "Périphériques (claviers, souris)",
+            "Stockage (disques durs, NAS, SSD)"
+          ]
+        },
+        {
+          "name": "Pièces de rechange pour matériel et équipements informatiques",
+          "items": [
+            "Cartes mères",
+            "Processeurs (CPU)",
+            "Mémoire RAM",
+            "Cartes graphiques",
+            "Alimentations",
+            "Disques durs internes",
+            "Ventilateurs et refroidisseurs",
+            "Batteries pour portables"
+          ]
+        },
+        {
+          "name": "Fournitures et consommables informatiques",
+          "items": [
+            "Cartouches d'encre",
+            "Toners laser",
+            "Papier pour imprimante",
+            "CD/DVD/Blu-ray vierges",
+            "Clés USB et disques externes",
+            "Câbles (HDMI, USB, réseau)",
+            "Nettoyants pour écran"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Matériel, mobilier et fournitures de bureau",
+      "subcategories": [
+        {
+          "name": "Matériel de bureau",
+          "items": [
+            "Photocopieurs",
+            "Télécopieurs (fax)",
+            "Destructeurs de documents",
+            "Plastifieuses",
+            "Relieuses",
+            "Massicots",
+            "Agrapheuses et dégrafeuses",
+            "Perforatrices"
+          ]
+        },
+        {
+          "name": "Mobilier de bureau",
+          "items": [
+            "Bureaux et tables de travail",
+            "Chaises de bureau",
+            "Armoires et classeurs",
+            "Étagères et rayonnages",
+            "Tables de réunion",
+            "Fauteuils d'accueil",
+            "Mobilier modulaire",
+            "Pupitres et présentoirs"
+          ]
+        },
+        {
+          "name": "Fournitures de bureau",
+          "items": [
+            "Papier (A4, A3)",
+            "Classeurs et chemises",
+            "Enveloppes",
+            "Stylos, crayons, surligneurs",
+            "Calculatrices",
+            "Tampons encreurs",
+            "Rubans adhésifs",
+            "Agrafes et trombones"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Matériel et fournitures électriques, électronique, électromécanique et pièces de rechange",
+      "subcategories": [
+        {
+          "name": "Equipements audio visuel ; de communication, de télécommunication",
+          "items": [
+            "Systèmes de sonorisation",
+            "Vidéoprojecteurs",
+            "Écrans de projection",
+            "Tableaux interactifs",
+            "Téléphones et standards",
+            "Routeurs et switches réseau",
+            "Systèmes de conférence",
+            "Caméras de surveillance"
+          ]
+        },
+        {
+          "name": "Equipements électronique",
+          "items": [
+            "Oscilloscopes",
+            "Générateurs de signaux",
+            "Multimètres",
+            "Analyseurs de spectre",
+            "Sources d'alimentation",
+            "Testeurs de composants",
+            "Équipements de mesure",
+            "Appareils de test"
+          ]
+        },
+        {
+          "name": "Matériel électromécanique",
+          "items": [
+            "Moteurs électriques",
+            "Génératrices",
+            "Variateurs de vitesse",
+            "Contacteurs et relais",
+            "Pompes électriques",
+            "Ventilateurs industriels",
+            "Actionneurs",
+            "Commutateurs"
+          ]
+        },
+        {
+          "name": "Matériel électrique",
+          "items": [
+            "Tableaux électriques",
+            "Disjoncteurs",
+            "Interrupteurs et prises",
+            "Câbles et fils électriques",
+            "Gaines et conduits",
+            "Transformateurs",
+            "Parafoudres",
+            "Éclairage industriel"
+          ]
+        },
+        {
+          "name": "Appareils d'éclairage (Accumulateurs, piles, batteries...)",
+          "items": [
+            "Lampes LED",
+            "Tubes fluorescents",
+            "Spots et projecteurs",
+            "Batteries rechargeables",
+            "Piles (AA, AAA, LR6)",
+            "Chargeurs de batterie",
+            "Lampes de secours",
+            "Éclairage d'urgence"
+          ]
+        },
+        {
+          "name": "fournitures électriques (lampes, disjoncteurs, prises......)",
+          "items": [
+            "Ampoules diverses",
+            "Douilles et culots",
+            "Prises murales",
+            "Interrupteurs",
+            "Plaquettes de connexion",
+            "Borniers",
+            "Fusibles",
+            "Gaines électriques"
+          ]
+        },
+        {
+          "name": "pièces de rechange pour matériel électrique, électronique et électromécanique",
+          "items": [
+            "Cartes électroniques",
+            "Capteurs et détecteurs",
+            "Roulements et paliers",
+            "Courroies et poulies",
+            "Brosses de moteur",
+            "Condensateurs",
+            "Résistances",
+            "Circuits intégrés"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Matériel technique, de lutte contre l'incendie et pièces de rechange",
+      "subcategories": [
+        {
+          "name": "Matériel technique",
+          "items": [
+            "Outils de précision",
+            "Instruments de mesure",
+            "Équipements de contrôle qualité",
+            "Appareils de test et diagnostic",
+            "Matériel d'atelier",
+            "Instruments de métrologie",
+            "Équipements de calibrage"
+          ]
+        },
+        {
+          "name": "Produits et matériel de lutte contre l'incendie",
+          "items": [
+            "Extincteurs",
+            "Couvertures anti-feu",
+            "Robinet d'incendie armé (RIA)",
+            "Systèmes de sprinklers",
+            "Détecteurs de fumée",
+            "Alarmes incendie",
+            "Équipements de protection individuelle (EPI) pour pompier",
+            "Haches et pioches incendie"
+          ]
+        },
+        {
+          "name": "Fournitures et pièces de rechange pour matériel technique",
+          "items": [
+            "Jointures et joints techniques",
+            "Roulements et paliers",
+            "Courroies de transmission",
+            "Filtres et éléments filtrants",
+            "Pièces détachées spécifiques",
+            "Lubrifiants techniques",
+            "Outils de maintenance"
+          ]
+        },
+        {
+          "name": "Pièces de rechange pour matériel de lutte contre l'incendie",
+          "items": [
+            "Manomètres pour extincteurs",
+            "Flexibles et raccords",
+            "Lances et buses",
+            "Cartouches CO2",
+            "Poudres extinctrices",
+            "Pièces détachées pour pompes",
+            "Éléments de détection"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Engins de chantier, matériel de manutention et de levage",
+      "subcategories": [
+        {
+          "name": "véhicules BTP (camion malaxeur, camion citerne, bulldozer, ...)",
+          "items": [
+            "Camions malaxeurs",
+            "Camions citernes",
+            "Bulldozers",
+            "Chargeuses sur pneus",
+            "Pelles mécaniques",
+            "Niveleuses",
+            "Compacteurs",
+            "Finisseurs d'enrobés"
+          ]
+        },
+        {
+          "name": "Engins et matériels de BTP",
+          "items": [
+            "Bétonnières",
+            "Grues à tour",
+            "Grues mobiles",
+            "Plaques vibrantes",
+            "Marteaux-piqueurs",
+            "Scies à béton",
+            "Pompes à béton",
+            "Échafaudages"
+          ]
+        },
+        {
+          "name": "matériel de manutention et de levage (Chariot élévateur, grues, nacelles ...)",
+          "items": [
+            "Chariots élévateurs",
+            "Transpalettes",
+            "Gerbeurs",
+            "Grues auxiliaires",
+            "Nacelles élévatrices",
+            "Palans et treuils",
+            "Convoyeurs à rouleaux",
+            "Tables élévatrices"
+          ]
+        },
+        {
+          "name": "Engins de chantier",
+          "items": [
+            "Tractopelles",
+            "Dumpers",
+            "Mini-pelles",
+            "Tombereaux",
+            "Engins de forage",
+            "Équipements de battage",
+            "Matériel de terrassement"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Matériel de transport, pièces de rechange et pneumatiques",
+      "subcategories": [
+        {
+          "name": "Véhicules à moteur (automobiles, navires, avions...)",
+          "items": [
+            "Voitures de fonction",
+            "Véhicules utilitaires",
+            "Camions et poids lourds",
+            "Navires et bateaux",
+            "Avions et hélicoptères",
+            "Motocyclettes",
+            "Véhicules spéciaux"
+          ]
+        },
+        {
+          "name": "Locomotives et matériel roulant de chemin de fer et de tramway, fournitures ferroviaires et pièces détachées",
+          "items": [
+            "Locomotives",
+            "Wagons",
+            "Voitures de voyageurs",
+            "Tramways",
+            "Rails et traverses",
+            "Aiguillages",
+            "Systèmes de signalisation",
+            "Équipements de gare"
+          ]
+        },
+        {
+          "name": "bicyclettes",
+          "items": [
+            "Vélos de ville",
+            "Vélos de course",
+            "VTT (vélo tout-terrain)",
+            "Vélos électriques",
+            "Vélos pliants",
+            "Vélos cargo",
+            "Accessoires de vélo"
+          ]
+        },
+        {
+          "name": "Carrosseries, remorques ou semi-remorques de véhicules",
+          "items": [
+            "Carrosseries de camions",
+            "Remorques",
+            "Semi-remorques",
+            "Bennes basculantes",
+            "Citernes",
+            "Plateaux",
+            "Fourgons",
+            "Aménagements spéciaux"
+          ]
+        },
+        {
+          "name": "chambre à air, pneumatiques et pièces de rechange pour véhicules et engins",
+          "items": [
+            "Pneus (tourisme, poids lourd)",
+            "Chambres à air",
+            "Jantes et roues",
+            "Valves et capuchons",
+            "Pneus agricoles",
+            "Pneus industriels",
+            "Équilibreuses",
+            "Matériel de réparation"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Matériel et articles de literie, de couchage, de cuisine et de buanderie",
+      "subcategories": [
+        {
+          "name": "Appareils et ustensiles de cuisine",
+          "items": [
+            "Cuisinières et fours",
+            "Réfrigérateurs et congélateurs",
+            "Lave-vaisselle",
+            "Micro-ondes",
+            "Ustensiles de cuisson",
+            "Vaisselle (assiettes, verres)",
+            "Batteries de cuisine",
+            "Petit électroménager"
+          ]
+        },
+        {
+          "name": "Matériel et articles de literie et de couchage",
+          "items": [
+            "Lits et sommiers",
+            "Matelas",
+            "Oreillers et couettes",
+            "Draps et housses",
+            "Couvertures",
+            "Literie d'hôpital",
+            "Lits superposés",
+            "Canapés-lits"
+          ]
+        },
+        {
+          "name": "Matériels et articles de buanderie",
+          "items": [
+            "Lave-linge",
+            "Sèche-linge",
+            "Fers à repasser",
+            "Tables à repasser",
+            "Paniers à linge",
+            "Étendoirs",
+            "Nettoyants textiles",
+            "Accessoires de buanderie"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Location avec option d'achat de biens, d'équipements de matériel et d'outillage",
+      "subcategories": [
+        {
+          "name": "Engins, machines, équipements BTP",
+          "items": [
+            "Location d'engins de chantier",
+            "Location de matériel BTP",
+            "Location de grues",
+            "Location de pompes à béton",
+            "Location de matériel de terrassement"
+          ]
+        },
+        {
+          "name": "Machines, équipements techniques, électroniques électromécaniques, médical et technico-médical",
+          "items": [
+            "Location de machines industrielles",
+            "Location d'équipements médicaux",
+            "Location de matériel technique",
+            "Location d'appareils de mesure",
+            "Location d'équipements de laboratoire"
+          ]
+        },
+        {
+          "name": "Matériel",
+          "items": [
+            "Location de matériel informatique",
+            "Location d'équipements audiovisuels",
+            "Location de mobilier",
+            "Location de matériel de bureau",
+            "Location d'outillage"
+          ]
+        },
+        {
+          "name": "Mobilier",
+          "items": [
+            "Location de bureaux",
+            "Location de chaises",
+            "Location d'armoires",
+            "Location de tables de réunion",
+            "Location de mobilier d'accueil"
+          ]
+        },
+        {
+          "name": "outillage",
+          "items": [
+            "Location d'outils électroportatifs",
+            "Location d'outils de jardinage",
+            "Location d'outils de construction",
+            "Location d'outils de précision",
+            "Location d'équipements de mesure"
+          ]
+        }
+      ]
+    }
+  ]
+}
