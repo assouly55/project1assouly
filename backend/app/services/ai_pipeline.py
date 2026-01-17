@@ -345,6 +345,57 @@ class AIService:
         
         return final_result
     
+    def _has_bordereau_indicators(self, content: str) -> bool:
+        """
+        Smart pre-check: Detect if document likely contains a Bordereau des Prix.
+        Returns True only if strong indicators are present.
+        """
+        content_lower = content.lower()
+        
+        # STRONG indicators - must have at least one
+        strong_indicators = [
+            "bordereau des prix",
+            "bordereau des prix - détail estimatif",
+            "bordereau des prix detail estimatif",
+            "bordereau des prix détail-estimatif",
+            "détail estimatif",
+            "detail estimatif",
+            "b.p.d.e",
+            "bpde",
+            "prix n°",
+            "n° prix",
+            "prix unitaire",
+            "montant ht",
+            "montant ttc",
+            "total ht",
+            "total ttc",
+        ]
+        
+        has_strong = any(ind in content_lower for ind in strong_indicators)
+        if not has_strong:
+            return False
+        
+        # Must also have TABLE structure indicators
+        table_indicators = [
+            "désignation",
+            "designation",
+            "unité",
+            "unite",
+            "quantité",
+            "quantite",
+            "forfait",
+            "ml",
+            "m²",
+            "m2",
+            "m³",
+            "m3",
+        ]
+        
+        table_count = sum(1 for ind in table_indicators if ind in content_lower)
+        
+        # Need at least 2 table structure indicators
+        return table_count >= 2
+    
     def _direct_extract(
         self,
         content: str,
@@ -354,7 +405,14 @@ class AIService:
         """
         Direct extraction: Feed whole document to AI and extract Bordereau items.
         AI will find the Bordereau section and extract items with units and quantities.
+        
+        Includes smart pre-check to skip documents that don't contain a Bordereau.
         """
+        # Smart pre-check: Skip documents without Bordereau indicators
+        if not self._has_bordereau_indicators(content):
+            logger.info(f"   ⏭ Skipping {source_name}: No Bordereau indicators found")
+            return None
+        
         logger.info(f"   🤖 Extracting Bordereau items from {source_name}...")
         
         # Feed the whole document (up to token limit) to extraction AI
