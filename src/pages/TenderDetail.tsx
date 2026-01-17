@@ -157,16 +157,35 @@ function CategoryPath({ categories }: { categories: TenderCategory[] }) {
   );
 }
 
+// Helper to safely extract string value from potentially nested objects like {value, source_document}
+function safeString(val: unknown): string | null {
+  if (val === null || val === undefined) return null;
+  if (typeof val === 'string') return val;
+  if (typeof val === 'number') return String(val);
+  if (typeof val === 'object' && 'value' in (val as object)) {
+    const nested = (val as { value: unknown }).value;
+    return typeof nested === 'string' ? nested : (nested != null ? String(nested) : null);
+  }
+  return null;
+}
+
 function LotCard({ lot, index, showArticles }: { lot: MergedLot; index: number; showArticles: boolean }) {
   // Safely access lot properties with defaults (French field names)
-  const lotNumber = lot?.numero_lot ?? (index + 1);
-  const lotSubject = lot?.objet_lot;
-  const lotValue = lot?.estimation_lot ?? '-';
-  const cautionProv = lot?.caution_provisoire ?? '-';
+  const lotNumber = safeString(lot?.numero_lot) ?? String(index + 1);
+  const lotSubject = safeString(lot?.objet_lot);
+  const lotValue = safeString(lot?.estimation_lot) ?? '-';
+  const cautionProv = safeString(lot?.caution_provisoire) ?? '-';
 
-  // Safely access articles
+  // Safely access articles and normalize nested objects
   const safeArticles: BordereauItem[] = Array.isArray(lot?.articles)
-    ? lot.articles.filter((it): it is BordereauItem => it && typeof it === 'object')
+    ? lot.articles
+        .filter((it): it is BordereauItem => it && typeof it === 'object')
+        .map((art) => ({
+          numero_prix: safeString(art.numero_prix),
+          designation: safeString(art.designation),
+          unite: safeString(art.unite),
+          quantite: safeString(art.quantite),
+        }))
     : [];
 
   return (
