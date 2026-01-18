@@ -1,4 +1,4 @@
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useSearchParams } from 'react-router-dom';
 import { useEffect, useState, useMemo } from 'react';
 import { ArrowLeft, ExternalLink, Bot, FileText, RefreshCw, Loader2, CheckCircle2, AlertCircle, User, Mail, Phone, Building2, Tag, MessageSquare } from 'lucide-react';
 import { AppLayout } from '@/components/layout/AppLayout';
@@ -267,12 +267,16 @@ function LoadingOverlay({ progress, message }: { progress: number; message: stri
 
 export default function TenderDetail() {
   const { id } = useParams<{ id: string }>();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [tender, setTender] = useState<Tender | null>(null);
   const [loading, setLoading] = useState(true);
   const [analyzing, setAnalyzing] = useState(false);
   const [analyzeProgress, setAnalyzeProgress] = useState(0);
   const [analyzeMessage, setAnalyzeMessage] = useState('Initialisation...');
   const [error, setError] = useState<string | null>(null);
+
+  // Check for ?analyze=true query param (for testing direct analysis)
+  const shouldForceAnalyze = searchParams.get('analyze') === 'true';
 
   // Fetch tender on mount
   useEffect(() => {
@@ -287,8 +291,14 @@ export default function TenderDetail() {
       if (response.success && response.data) {
         setTender(response.data);
         
-        // Auto-trigger analysis if tender is LISTED (not yet analyzed)
-        if (response.data.status === 'LISTED' && !response.data.bordereau_metadata) {
+        // Auto-trigger analysis if:
+        // 1. Force analyze via URL param (?analyze=true), OR
+        // 2. Tender is LISTED (not yet analyzed)
+        if (shouldForceAnalyze || (response.data.status === 'LISTED' && !response.data.bordereau_metadata)) {
+          // Clear the analyze param from URL after triggering
+          if (shouldForceAnalyze) {
+            setSearchParams({}, { replace: true });
+          }
           triggerAnalysis(id);
         }
       } else {
@@ -299,7 +309,7 @@ export default function TenderDetail() {
     };
     
     fetchTender();
-  }, [id]);
+  }, [id, shouldForceAnalyze]);
 
   const triggerAnalysis = async (tenderId: string) => {
     setAnalyzing(true);
