@@ -100,6 +100,16 @@ class TenderApiClient {
     return this.request('/api/scraper/stop', { method: 'POST' });
   }
 
+  /**
+   * Import and analyze a single tender from direct URL
+   */
+  async importSingleTender(url: string): Promise<ApiResponse<Tender>> {
+    return this.request('/api/scraper/import-single', {
+      method: 'POST',
+      body: JSON.stringify({ url }),
+    });
+  }
+
   // ============================
   // TENDER ENDPOINTS
   // ============================

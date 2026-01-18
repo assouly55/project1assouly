@@ -1,21 +1,55 @@
 import { useState } from 'react';
-import { FileText, Search, Filter } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { FileText, Search, Filter, FlaskConical, Loader2, Link as LinkIcon } from 'lucide-react';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { TenderTable } from '@/components/tenders/TenderTable';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { useTenders } from '@/hooks/useTenders';
+import { api } from '@/lib/api';
+import { toast } from 'sonner';
 import type { TenderSearchParams } from '@/types/tender';
 
 export default function Index() {
+  const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState('');
   const [searchParams, setSearchParams] = useState<TenderSearchParams>({});
   
-  const { data, isLoading, error } = useTenders(searchParams);
+  // Single tender import state
+  const [importUrl, setImportUrl] = useState('');
+  const [isImporting, setIsImporting] = useState(false);
+  
+  const { data, isLoading, error, refetch } = useTenders(searchParams);
   
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
     setSearchParams(prev => ({ ...prev, query: searchQuery }));
+  };
+
+  const handleImportSingle = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!importUrl.trim()) {
+      toast.error('Veuillez entrer une URL');
+      return;
+    }
+    
+    setIsImporting(true);
+    try {
+      const result = await api.importSingleTender(importUrl.trim());
+      if (result.success && result.data) {
+        toast.success('Appel d\'offres importé avec succès');
+        setImportUrl('');
+        refetch();
+        // Navigate to the tender detail page with analyze flag
+        navigate(`/tender/${result.data.id}?analyze=true`);
+      } else {
+        toast.error(result.error || 'Erreur lors de l\'import');
+      }
+    } catch (err) {
+      toast.error('Erreur lors de l\'import');
+    } finally {
+      setIsImporting(false);
+    }
   };
 
   const tenders = data?.items || [];
@@ -32,6 +66,43 @@ export default function Index() {
               {totalCount} appel{totalCount !== 1 ? 's' : ''} d'offres analysé{totalCount !== 1 ? 's' : ''}
             </p>
           </div>
+        </div>
+
+        {/* Test: Import Single Tender */}
+        <div className="data-card p-4 border-dashed border-primary/30 bg-primary/5">
+          <div className="flex items-center gap-2 mb-3">
+            <FlaskConical className="w-4 h-4 text-primary" />
+            <span className="text-sm font-medium">Test: Importer un appel d'offres</span>
+          </div>
+          <form onSubmit={handleImportSingle} className="flex gap-3">
+            <div className="relative flex-1">
+              <LinkIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+              <Input
+                type="url"
+                placeholder="https://www.marchespublics.gov.ma/index.php?page=entreprise.EntrepriseDetailsConsultation&refConsultation=..."
+                value={importUrl}
+                onChange={(e) => setImportUrl(e.target.value)}
+                className="pl-10 font-mono text-xs"
+                disabled={isImporting}
+              />
+            </div>
+            <Button type="submit" disabled={isImporting || !importUrl.trim()}>
+              {isImporting ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Import...
+                </>
+              ) : (
+                <>
+                  <FlaskConical className="w-4 h-4 mr-2" />
+                  Importer & Analyser
+                </>
+              )}
+            </Button>
+          </form>
+          <p className="text-xs text-muted-foreground mt-2">
+            Collez l'URL directe d'un appel d'offres depuis marchespublics.gov.ma pour l'importer et lancer l'analyse.
+          </p>
         </div>
 
         {/* Search & Filters */}
