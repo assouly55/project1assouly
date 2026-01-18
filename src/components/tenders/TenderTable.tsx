@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
-import { ExternalLink, FileText, ChevronRight, ChevronDown, ChevronUp } from 'lucide-react';
+import { ExternalLink, FileText, ChevronRight, ChevronDown, ChevronUp, FlaskConical } from 'lucide-react';
 import {
   Table,
   TableBody,
@@ -268,6 +268,14 @@ export function TenderTable({ tenders, isLoading }: TenderTableProps) {
                       >
                         <ExternalLink className="w-4 h-4 text-muted-foreground" />
                       </a>
+                      <Link
+                        to={`/tender/${tender.id}?analyze=true`}
+                        className="p-1.5 rounded hover:bg-accent text-accent-foreground transition-colors"
+                        title="Forcer l'analyse (test)"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <FlaskConical className="w-4 h-4 text-primary" />
+                      </Link>
                       <Link
                         to={`/tender/${tender.id}`}
                         className="p-1.5 rounded hover:bg-muted transition-colors"
