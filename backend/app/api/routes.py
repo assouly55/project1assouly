@@ -559,6 +559,131 @@ def stop_scraper():
     return {"stopped": False, "message": "No scraper running"}
 
 
+class ImportSingleRequest(BaseModel):
+    url: str
+
+
+@router.post("/api/scraper/import-single")
+async def import_single_tender(
+    request: ImportSingleRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db)
+):
+    """
+    Import and process a single tender from a direct URL.
+    
+    This endpoint is for testing - it takes a full tender URL like:
+    https://www.marchespublics.gov.ma/index.php?page=entreprise.EntrepriseDetailsConsultation&refConsultation=970495&orgAcronyme=g3h
+    
+    And runs the full scrape + analysis pipeline on just that tender.
+    """
+    from loguru import logger
+    import re
+    
+    url = request.url.strip()
+    
+    # Validate URL format
+    if "marchespublics.gov.ma" not in url:
+        raise HTTPException(400, "URL must be from marchespublics.gov.ma")
+    
+    if "refConsultation" not in url:
+        raise HTTPException(400, "URL must contain refConsultation parameter")
+    
+    # Extract reference for dedup check
+    ref_match = re.search(r'refConsultation=(\d+)', url)
+    ref_consultation = ref_match.group(1) if ref_match else None
+    
+    # Check if already exists
+    if ref_consultation:
+        existing = db.query(Tender).filter(
+            Tender.source_url.contains(f"refConsultation={ref_consultation}")
+        ).first()
+        if existing:
+            logger.info(f"Tender {ref_consultation} already exists, returning existing")
+            return _tender_to_dict(existing)
+    
+    logger.info(f"Importing single tender from: {url}")
+    
+    # Run the import in a thread
+    import threading
+    result_holder = {"tender_id": None, "error": None}
+    
+    def run_import():
+        import asyncio
+        import sys
+        
+        if sys.platform == "win32":
+            loop = asyncio.ProactorEventLoop()
+        else:
+            loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        try:
+            tender_id = loop.run_until_complete(_import_single_tender_async(url))
+            result_holder["tender_id"] = tender_id
+        except Exception as e:
+            logger.error(f"Import failed: {e}")
+            result_holder["error"] = str(e)
+        finally:
+            loop.close()
+    
+    thread = threading.Thread(target=run_import)
+    thread.start()
+    thread.join(timeout=300)  # 5 minute timeout
+    
+    if result_holder["error"]:
+        raise HTTPException(500, f"Import failed: {result_holder['error']}")
+    
+    if not result_holder["tender_id"]:
+        raise HTTPException(500, "Import failed: no tender created")
+    
+    # Fetch and return the created tender
+    tender = db.query(Tender).filter(Tender.id == result_holder["tender_id"]).first()
+    if not tender:
+        raise HTTPException(500, "Import completed but tender not found")
+    
+    return _tender_to_dict(tender)
+
+
+async def _import_single_tender_async(tender_url: str) -> Optional[str]:
+    """
+    Import a single tender asynchronously.
+    Reuses the _process_single_tender logic.
+    """
+    from app.core.database import SessionLocal
+    from loguru import logger
+    from playwright.async_api import async_playwright
+    from app.core.config import settings
+    from datetime import datetime
+    
+    logger.info(f"Starting single tender import: {tender_url}")
+    
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=settings.SCRAPER_HEADLESS)
+        context = await browser.new_context(accept_downloads=True)
+        
+        try:
+            # Create a minimal scraper instance
+            scraper = TenderScraper()
+            semaphore = asyncio.Semaphore(1)
+            
+            tender_id = await _process_single_tender(
+                context=context,
+                scraper=scraper,
+                tender_url=tender_url,
+                idx=1,
+                semaphore=semaphore,
+                db_session_factory=SessionLocal,
+                download_date=datetime.now().strftime("%Y-%m-%d")
+            )
+            
+            return tender_id
+            
+        finally:
+            await context.close()
+            await browser.close()
+
+
 # ============================
 # TENDER ENDPOINTS
 # ============================
