@@ -1,6 +1,8 @@
 """
 Tender AI Platform - Pipeline Processor
 Handles concurrent processing of tenders: extraction, indexing, and storage
+
+Updated: AI-based file detection prioritizes Bordereau files before processing.
 """
 
 import asyncio
@@ -27,6 +29,7 @@ from app.services.article_indexer import (
     build_article_index_for_db,
     slice_document_by_articles,
 )
+from app.services.file_detector import detect_and_prioritize_files
 
 
 @dataclass
@@ -408,8 +411,8 @@ async def process_tender_documents(
     Full processing pipeline for a tender's documents.
     
     1. Extract all files (including nested ZIPs)
-    2. Detect and handle merged files
-    3. Process all documents concurrently (5 workers)
+    2. AI-based file detection to prioritize Bordereau files
+    3. Process prioritized files first (Bordereau → CPS → Others)
     4. Build article index for CPS/RC
     5. Return processed documents and combined index
     
@@ -434,35 +437,57 @@ async def process_tender_documents(
     
     logger.info(f"Extracted {len(files)} files from ZIP")
     
-    # Step 2: Detect merged files
-    merged = detect_merged_files(files)
+    # Step 2: AI-based file detection to prioritize Bordereau files
+    if on_progress:
+        on_progress("🔍 AI analyzing filenames to detect Bordereau files...")
+    
+    filenames = list(files.keys())
+    bordereau_files, cps_files, other_files = detect_and_prioritize_files(filenames)
+    
+    if on_progress:
+        if bordereau_files:
+            on_progress(f"✓ Detected {len(bordereau_files)} potential Bordereau files")
+        elif cps_files:
+            on_progress(f"✓ No Bordereau files found, will use {len(cps_files)} CPS files")
+    
+    # Step 3: Reorder files for processing: Bordereau first → CPS → Others
+    prioritized_order = bordereau_files + cps_files + other_files
+    prioritized_files = {k: files[k] for k in prioritized_order if k in files}
+    
+    # Add any files that weren't categorized (shouldn't happen but safety)
+    for k, v in files.items():
+        if k not in prioritized_files:
+            prioritized_files[k] = v
+    
+    logger.info(f"📋 Processing order: {len(bordereau_files)} bordereau → {len(cps_files)} CPS → {len(other_files)} others")
+    
+    # Step 4: Detect merged files
+    merged = detect_merged_files(prioritized_files)
     if merged:
         for merged_file, refs in merged.items():
             if on_progress:
                 on_progress(f"⚠ Merged file detected: {merged_file} ({len(refs)} refs)")
-            # Attempt split (currently returns original)
-            if merged_file in files:
+            if merged_file in prioritized_files:
                 split_files = split_merged_file(
                     merged_file, 
-                    files[merged_file], 
+                    prioritized_files[merged_file], 
                     refs
                 )
-                # Update files dict
-                del files[merged_file]
-                files.update(split_files)
+                del prioritized_files[merged_file]
+                prioritized_files.update(split_files)
     
-    # Step 3: Process documents concurrently
+    # Step 5: Process documents concurrently (prioritized order)
     if on_progress:
-        on_progress(f"Processing {len(files)} documents (5 concurrent workers)...")
+        on_progress(f"Processing {len(prioritized_files)} documents (5 concurrent workers)...")
     
     documents = await process_documents_concurrent(
-        files, 
+        prioritized_files, 
         tender_ref, 
         max_workers,
         on_progress
     )
     
-    # Step 4: Build combined article index
+    # Step 6: Build combined article index
     article_index = build_combined_article_index(documents)
     
     if article_index:
@@ -473,8 +498,7 @@ async def process_tender_documents(
         if on_progress:
             on_progress(f"✓ Indexed {total_articles} articles across {len(article_index)} documents")
     
-    # Step 5: Return ALL successfully processed documents (no filtering)
-    # Note: select_best_document_per_type can be used later for AI extraction prioritization
+    # Step 7: Return ALL successfully processed documents (no filtering)
     success_count = sum(1 for d in documents if d.success)
     logger.info(f"Processed {success_count}/{len(documents)} documents successfully")
     
