@@ -473,13 +473,9 @@ async def process_tender_documents(
         if on_progress:
             on_progress(f"✓ Indexed {total_articles} articles across {len(article_index)} documents")
     
-    # Step 5: Select best documents per type
-    best_docs = select_best_document_per_type(documents)
+    # Step 5: Return ALL successfully processed documents (no filtering)
+    # Note: select_best_document_per_type can be used later for AI extraction prioritization
+    success_count = sum(1 for d in documents if d.success)
+    logger.info(f"Processed {success_count}/{len(documents)} documents successfully")
     
-    # Keep only best documents (discard duplicates)
-    final_documents = list(best_docs.values())
-    
-    success_count = sum(1 for d in final_documents if d.success)
-    logger.info(f"Processed {success_count}/{len(final_documents)} documents successfully")
-    
-    return final_documents, article_index
+    return documents, article_index
