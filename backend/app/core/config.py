@@ -24,11 +24,6 @@ class Settings(BaseSettings):
     DEEPSEEK_BASE_URL: str = "https://api.deepseek.com/v1"
     DEEPSEEK_MODEL: str = "deepseek-chat"
     
-    # Mistral AI (for OCR - Vision API)
-    MISTRAL_API_KEY: str = ""
-    MISTRAL_API_URL: str = "https://api.mistral.ai/v1/chat/completions"
-    MISTRAL_OCR_MODEL: str = "pixtral-12b-2409"
-    
     # Scraper Configuration
     SCRAPER_HEADLESS: bool = False  # TEMP: Disabled for debugging popup click
     SCRAPER_MAX_CONCURRENT: int = 5
