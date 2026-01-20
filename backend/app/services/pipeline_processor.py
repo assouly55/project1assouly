@@ -330,19 +330,21 @@ def build_combined_article_index(documents: List[ProcessedDocument]) -> Optional
     """
     Build combined article index from all CPS/RC documents.
     Structure: {"CPS": {...}, "RC": {...}}
+    Includes full document content for lookups outside indexed articles.
     """
     index = {}
     
     for doc in documents:
-        if doc.article_index and doc.document_type in [DocumentType.CPS, DocumentType.RC]:
+        if doc.document_type in [DocumentType.CPS, DocumentType.RC]:
             doc_type = doc.document_type.value
             
             if doc_type not in index:
                 index[doc_type] = {
                     "filename": doc.filename,
-                    "total_articles": len(doc.article_index),
+                    "total_articles": len(doc.article_index) if doc.article_index else 0,
                     "total_chars": len(doc.raw_text),
-                    "articles": doc.article_index
+                    "full_content": doc.raw_text,  # Keep full content for lookups outside articles
+                    "articles": doc.article_index or []
                 }
     
     return index if index else None
@@ -405,25 +407,28 @@ async def process_tender_documents(
     zip_bytes: bytes,
     tender_ref: Optional[str] = None,
     max_workers: int = 5,
-    on_progress: Optional[Callable[[str], None]] = None
+    on_progress: Optional[Callable[[str], None]] = None,
+    on_bordereau_ready: Optional[Callable[[List[ProcessedDocument]], None]] = None
 ) -> Tuple[List[ProcessedDocument], Optional[Dict]]:
     """
     Full processing pipeline for a tender's documents.
     
+    PRIORITY FLOW:
     1. Extract all files (including nested ZIPs)
     2. AI-based file detection to prioritize Bordereau files
-    3. Process prioritized files first (Bordereau → CPS → Others)
-    4. Build article index for CPS/RC
-    5. Return processed documents and combined index
+    3. Process bordereau files FIRST with OCR → Return immediately for AI extraction
+    4. Then process CPS and other files for indexing
+    5. Build article index from CPS/RC (with full content for lookups)
     
     Args:
         zip_bytes: Raw ZIP file bytes
         tender_ref: Tender reference for logging
         max_workers: Concurrent workers for extraction/OCR
         on_progress: Progress callback
+        on_bordereau_ready: Callback when bordereau files are processed (for early AI extraction)
         
     Returns:
-        Tuple of (documents, article_index)
+        Tuple of (all_documents, article_index)
     """
     if on_progress:
         on_progress(f"Extracting files for {tender_ref or 'tender'}...")
@@ -450,45 +455,84 @@ async def process_tender_documents(
         elif cps_files:
             on_progress(f"✓ No Bordereau files found, will use {len(cps_files)} CPS files")
     
-    # Step 3: Reorder files for processing: Bordereau first → CPS → Others
-    prioritized_order = bordereau_files + cps_files + other_files
-    prioritized_files = {k: files[k] for k in prioritized_order if k in files}
+    logger.info(f"📋 Priority: {len(bordereau_files)} bordereau → {len(cps_files)} CPS → {len(other_files)} others")
     
-    # Add any files that weren't categorized (shouldn't happen but safety)
-    for k, v in files.items():
-        if k not in prioritized_files:
-            prioritized_files[k] = v
+    all_documents = []
     
-    logger.info(f"📋 Processing order: {len(bordereau_files)} bordereau → {len(cps_files)} CPS → {len(other_files)} others")
+    # Step 3: Process BORDEREAU files FIRST (priority processing)
+    if bordereau_files:
+        if on_progress:
+            on_progress(f"🚀 Priority processing {len(bordereau_files)} bordereau files...")
+        
+        bordereau_file_dict = {k: files[k] for k in bordereau_files if k in files}
+        bordereau_docs = await process_documents_concurrent(
+            bordereau_file_dict,
+            tender_ref,
+            max_workers,
+            on_progress
+        )
+        all_documents.extend(bordereau_docs)
+        
+        # Call the callback so AI can start bordereau extraction immediately
+        if on_bordereau_ready and bordereau_docs:
+            successful_docs = [d for d in bordereau_docs if d.success and d.raw_text]
+            if successful_docs:
+                logger.info(f"🎯 Bordereau files ready - triggering early AI extraction")
+                on_bordereau_ready(successful_docs)
     
-    # Step 4: Detect merged files
-    merged = detect_merged_files(prioritized_files)
+    # Step 4: Process CPS files (for metadata and article indexing)
+    if cps_files:
+        if on_progress:
+            on_progress(f"📄 Processing {len(cps_files)} CPS files...")
+        
+        cps_file_dict = {k: files[k] for k in cps_files if k in files}
+        cps_docs = await process_documents_concurrent(
+            cps_file_dict,
+            tender_ref,
+            max_workers,
+            on_progress
+        )
+        all_documents.extend(cps_docs)
+        
+        # If no bordereau files were found, CPS might contain bordereau
+        # Trigger callback so AI can try extracting from CPS
+        if not bordereau_files and on_bordereau_ready and cps_docs:
+            successful_cps = [d for d in cps_docs if d.success and d.raw_text]
+            if successful_cps:
+                logger.info(f"🎯 No bordereau files - using CPS for bordereau extraction")
+                on_bordereau_ready(successful_cps)
+    
+    # Step 5: Detect merged files in remaining files
+    other_file_dict = {k: files[k] for k in other_files if k in files}
+    merged = detect_merged_files(other_file_dict)
     if merged:
         for merged_file, refs in merged.items():
             if on_progress:
                 on_progress(f"⚠ Merged file detected: {merged_file} ({len(refs)} refs)")
-            if merged_file in prioritized_files:
+            if merged_file in other_file_dict:
                 split_files = split_merged_file(
                     merged_file, 
-                    prioritized_files[merged_file], 
+                    other_file_dict[merged_file], 
                     refs
                 )
-                del prioritized_files[merged_file]
-                prioritized_files.update(split_files)
+                del other_file_dict[merged_file]
+                other_file_dict.update(split_files)
     
-    # Step 5: Process documents concurrently (prioritized order)
-    if on_progress:
-        on_progress(f"Processing {len(prioritized_files)} documents (5 concurrent workers)...")
+    # Step 6: Process remaining files
+    if other_file_dict:
+        if on_progress:
+            on_progress(f"📄 Processing {len(other_file_dict)} remaining files...")
+        
+        other_docs = await process_documents_concurrent(
+            other_file_dict,
+            tender_ref,
+            max_workers,
+            on_progress
+        )
+        all_documents.extend(other_docs)
     
-    documents = await process_documents_concurrent(
-        prioritized_files, 
-        tender_ref, 
-        max_workers,
-        on_progress
-    )
-    
-    # Step 6: Build combined article index
-    article_index = build_combined_article_index(documents)
+    # Step 7: Build combined article index (includes full content for lookups)
+    article_index = build_combined_article_index(all_documents)
     
     if article_index:
         total_articles = sum(
@@ -498,8 +542,8 @@ async def process_tender_documents(
         if on_progress:
             on_progress(f"✓ Indexed {total_articles} articles across {len(article_index)} documents")
     
-    # Step 7: Return ALL successfully processed documents (no filtering)
-    success_count = sum(1 for d in documents if d.success)
-    logger.info(f"Processed {success_count}/{len(documents)} documents successfully")
+    # Step 8: Return ALL successfully processed documents
+    success_count = sum(1 for d in all_documents if d.success)
+    logger.info(f"Processed {success_count}/{len(all_documents)} documents successfully")
     
-    return documents, article_index
+    return all_documents, article_index

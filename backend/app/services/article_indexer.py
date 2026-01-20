@@ -370,13 +370,14 @@ def find_relevant_articles(
 def build_article_index_for_db(text: str, doc_type: str) -> Dict:
     """
     Build article index structure suitable for storing in database.
+    Includes full document content for lookups outside indexed articles.
     
     Args:
         text: Full document text
         doc_type: Document type (CPS, RC, etc.)
         
     Returns:
-        Dict with article index and metadata
+        Dict with article index, full content, and metadata
     """
     articles = get_verified_articles(text)
     
@@ -384,6 +385,7 @@ def build_article_index_for_db(text: str, doc_type: str) -> Dict:
         "doc_type": doc_type,
         "total_articles": len(articles),
         "total_chars": len(text),
+        "full_content": text,  # Keep full document content for lookups outside articles
         "articles": [
             {
                 "articleNumber": art["articleNumber"],

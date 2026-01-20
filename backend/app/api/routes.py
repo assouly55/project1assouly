@@ -264,23 +264,73 @@ async def _process_single_tender(
             
             documents_for_phase2 = []
             documents = []
+            bordereau_result = None
+            bordereau_docs_for_early_extraction = []
+            
+            # Callback for early bordereau extraction
+            def on_bordereau_ready(bordereau_docs):
+                nonlocal bordereau_docs_for_early_extraction
+                bordereau_docs_for_early_extraction = bordereau_docs
             
             if downloaded.success and downloaded.zip_bytes:
-                logger.info(f"[{idx}] Processing documents...")
+                logger.info(f"[{idx}] Processing documents (bordereau priority)...")
                 
-                # Process documents concurrently
+                # Process documents with bordereau priority callback
                 documents, article_index = await process_tender_documents(
                     downloaded.zip_bytes,
                     tender_ref,
                     max_workers=MAX_CONCURRENT_EXTRACTION,
-                    on_progress=lambda msg: logger.debug(f"[{idx}] {msg}")
+                    on_progress=lambda msg: logger.debug(f"[{idx}] {msg}"),
+                    on_bordereau_ready=on_bordereau_ready
                 )
                 
-                # Store article index on tender
+                # Store article index on tender (includes full content for lookups)
                 if article_index:
                     tender.article_index = article_index
                 
-                # Store documents in DB and prepare for Phase 2
+                # Get existing lots from Phase 1 for bordereau extraction
+                existing_lots = []
+                if merged_metadata and merged_metadata.get("lots"):
+                    existing_lots = [
+                        str(lot.get("lot_number"))
+                        for lot in merged_metadata.get("lots", [])
+                        if lot.get("lot_number")
+                    ]
+                
+                # Step 5: Run Phase 2 - Bordereau extraction EARLY on priority files
+                if bordereau_docs_for_early_extraction:
+                    logger.info(f"[{idx}] Phase 2: Early bordereau extraction from {len(bordereau_docs_for_early_extraction)} priority files...")
+                    
+                    early_docs = [
+                        {
+                            "filename": doc.filename,
+                            "document_type": _doc_type_str(doc.document_type),
+                            "raw_text": doc.raw_text,
+                            "article_index": doc.article_index
+                        }
+                        for doc in bordereau_docs_for_early_extraction
+                        if doc.success and doc.raw_text
+                    ]
+                    
+                    if early_docs:
+                        bordereau_result = ai_service.extract_bordereau_items_smart(
+                            early_docs,
+                            existing_lots=existing_lots
+                        )
+                        
+                        items_found = 0
+                        if bordereau_result:
+                            items_found = bordereau_result.get('_completeness', {}).get('total_articles', 0)
+                            logger.info(f"[{idx}] ✓ Early extraction: {items_found} items")
+                        
+                        if items_found > 0:
+                            # Save bordereau immediately so frontend can display
+                            tender.bordereau_metadata = bordereau_result
+                            tender.universal_metadata = bordereau_result
+                            db.flush()  # Make available to frontend without full commit
+                            logger.info(f"[{idx}] ✓ Bordereau posted to frontend early")
+                
+                # Store documents in DB and prepare for Phase 2 fallback
                 for doc in documents:
                     if doc.success and doc.raw_text:
                         db_doc = TenderDocument(
@@ -296,7 +346,7 @@ async def _process_single_tender(
                         )
                         db.add(db_doc)
                         
-                        # Prepare document dict for Phase 2
+                        # Prepare document dict for Phase 2 fallback
                         documents_for_phase2.append({
                             "filename": doc.filename,
                             "document_type": _doc_type_str(doc.document_type),
@@ -304,33 +354,24 @@ async def _process_single_tender(
                             "article_index": doc.article_index
                         })
                 
-                # Step 5: Run Phase 2 - Bordereau extraction (always run if we have docs)
-                bordereau_result = None
-                if documents_for_phase2:
-                    logger.info(f"[{idx}] Phase 2: Extracting bordereau items...")
+                # If early extraction failed, try with all documents
+                items_found = 0
+                if bordereau_result:
+                    items_found = bordereau_result.get('_completeness', {}).get('total_articles', 0)
+                
+                if items_found == 0 and documents_for_phase2:
+                    logger.info(f"[{idx}] Phase 2: Fallback extraction from all documents...")
                     
-                    # Get existing lots from Phase 1
-                    existing_lots = []
-                    if merged_metadata and merged_metadata.get("lots"):
-                        existing_lots = [
-                            str(lot.get("lot_number"))
-                            for lot in merged_metadata.get("lots", [])
-                            if lot.get("lot_number")
-                        ]
-                    
-                    # Run smart bordereau extraction (Excel first, then CPS)
                     bordereau_result = ai_service.extract_bordereau_items_smart(
                         documents_for_phase2,
                         existing_lots=existing_lots
                     )
                     
-                    # Check if extraction was successful
-                    items_found = 0
                     if bordereau_result:
                         items_found = bordereau_result.get('_completeness', {}).get('total_articles', 0)
-                        logger.info(f"[{idx}] ✓ Initial extraction: {items_found} items")
+                        logger.info(f"[{idx}] ✓ Fallback extraction: {items_found} items")
                     
-                    # If no items found, try focused retry (deeper search without indicator check)
+                    # If still nothing, try focused retry
                     if items_found == 0:
                         logger.warning(f"[{idx}] ⚠ No bordereau items found, running focused retry...")
                         retry_result = ai_service.extract_bordereau_focused_retry(
@@ -344,7 +385,7 @@ async def _process_single_tender(
                     
                     if bordereau_result and items_found > 0:
                         tender.bordereau_metadata = bordereau_result
-                        tender.universal_metadata = bordereau_result  # Backward compat
+                        tender.universal_metadata = bordereau_result
                         logger.info(f"[{idx}] ✓ Final bordereau: {items_found} items")
                 
                 # Step 6: ONLY if Phase 1 incomplete, use document fallbacks

@@ -72,7 +72,6 @@ def _initialize_paddle_ocr():
             use_angle_cls=True,
             lang='fr',  # French - also handles general Latin text well
             show_log=False,
-            use_gpu=False,  # CPU mode for compatibility
             det_db_thresh=0.3,  # Lower threshold for better table line detection
             det_db_box_thresh=0.5,
             rec_batch_num=6,

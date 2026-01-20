@@ -163,7 +163,6 @@ def ocr_first_page_tesseract(file_bytes: io.BytesIO) -> str:
         pdf_bytes = file_bytes.read()
         
         # Convert first page only at higher DPI for accuracy
-        logger.info("Converting first page to image for OCR...")
         images = convert_from_bytes(
             pdf_bytes,
             dpi=250,  # Higher DPI for first page (classification needs accuracy)
@@ -180,7 +179,6 @@ def ocr_first_page_tesseract(file_bytes: io.BytesIO) -> str:
         # Optimize and OCR
         img = _optimize_image_for_ocr(images[0])
         
-        logger.info("Running Tesseract OCR on first page...")
         text = pytesseract.image_to_string(
             img,
             lang="fra+ara+eng",
