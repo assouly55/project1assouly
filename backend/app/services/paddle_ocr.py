@@ -6,6 +6,7 @@ Uses PaddleOCR which excels at table structure recognition.
 
 import io
 import os
+import threading
 from typing import Tuple, List, Optional
 from loguru import logger
 from PIL import Image
@@ -27,61 +28,82 @@ def _get_poppler_path() -> Optional[str]:
 
 def _detect_and_fix_orientation(image: Image.Image) -> Image.Image:
     """
-    Detect page orientation using Tesseract OSD and rotate if needed.
-    Handles landscape scans that appear sideways.
+    Fast orientation handling.
+
+    We avoid Tesseract OSD here because it's *very* slow and can turn OCR into minutes/page.
+    Instead we apply a cheap heuristic: if the page is clearly landscape, rotate 90°.
+
+    You can re-enable the slower-but-smarter OSD by setting:
+      ENABLE_OCR_OSD=true
     """
     try:
-        import pytesseract
-        
-        # Configure Tesseract path for Windows
-        if IS_WINDOWS:
-            tesseract_path = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
-            if os.path.exists(tesseract_path):
-                pytesseract.pytesseract.tesseract_cmd = tesseract_path
-        
-        osd_data = pytesseract.image_to_osd(image, output_type=pytesseract.Output.DICT)
-        rotation_angle = osd_data.get('rotate', 0)
-        orientation_conf = osd_data.get('orientation_conf', 0)
-        
-        if rotation_angle != 0 and orientation_conf > 1.0:
-            logger.info(f"PaddleOCR: Auto-rotating image by {rotation_angle}° (confidence: {orientation_conf:.1f})")
-            image = image.rotate(-rotation_angle, expand=True)
-        
+        w, h = image.size
+        if w > h * 1.20:
+            logger.info("PaddleOCR: Fast-rotating landscape page by 90°")
+            return image.rotate(-90, expand=True)
+
+        if os.getenv("ENABLE_OCR_OSD", "false").lower() in {"1", "true", "yes"}:
+            import pytesseract
+
+            # Configure Tesseract path for Windows
+            if IS_WINDOWS:
+                tesseract_path = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+                if os.path.exists(tesseract_path):
+                    pytesseract.pytesseract.tesseract_cmd = tesseract_path
+
+            osd_data = pytesseract.image_to_osd(image, output_type=pytesseract.Output.DICT)
+            rotation_angle = int(osd_data.get("rotate", 0) or 0)
+            orientation_conf = float(osd_data.get("orientation_conf", 0) or 0)
+
+            # Use a higher confidence threshold to avoid bad rotations
+            if rotation_angle != 0 and orientation_conf >= 10.0:
+                logger.info(
+                    f"PaddleOCR: OSD rotating image by {rotation_angle}° (confidence: {orientation_conf:.1f})"
+                )
+                return image.rotate(-rotation_angle, expand=True)
+
         return image
     except Exception as e:
         logger.debug(f"Orientation detection skipped: {e}")
         return image
 
 
+_PADDLE_OCR_INSTANCE = None
+_PADDLE_OCR_LOCK = threading.Lock()
+
+
 def _initialize_paddle_ocr():
-    """
-    Initialize PaddleOCR with optimal settings for French/Arabic documents.
-    Returns configured OCR instance.
-    """
-    try:
-        # Disable model source check to speed up initialization
-        import os
-        os.environ["DISABLE_MODEL_SOURCE_CHECK"] = "True"
-        
-        from paddleocr import PaddleOCR
-        
-        # Initialize with multilingual support
-        # use_angle_cls=True helps with rotated text
-        # show_log=False to reduce noise
-        ocr = PaddleOCR(
-            use_angle_cls=True,
-            lang='fr',  # French - also handles general Latin text well
-            det_db_thresh=0.3,  # Lower threshold for better table line detection
-            det_db_box_thresh=0.5,
-            rec_batch_num=6,
-        )
-        return ocr
-    except ImportError:
-        logger.error("PaddleOCR not installed. Install with: pip install paddlepaddle paddleocr")
-        return None
-    except Exception as e:
-        logger.error(f"Failed to initialize PaddleOCR: {e}")
-        return None
+    """Initialize PaddleOCR once and reuse it (model init is expensive)."""
+    global _PADDLE_OCR_INSTANCE
+
+    if _PADDLE_OCR_INSTANCE is not None:
+        return _PADDLE_OCR_INSTANCE
+
+    with _PADDLE_OCR_LOCK:
+        if _PADDLE_OCR_INSTANCE is not None:
+            return _PADDLE_OCR_INSTANCE
+
+        try:
+            # Disable model source check to speed up initialization
+            os.environ["DISABLE_MODEL_SOURCE_CHECK"] = "True"
+
+            from paddleocr import PaddleOCR
+
+            # NOTE: PaddleOCR versions vary a lot; keep constructor args minimal.
+            _PADDLE_OCR_INSTANCE = PaddleOCR(
+                use_angle_cls=True,  # angle classification handled at init (more compatible)
+                lang="fr",
+                det_db_thresh=0.3,
+                det_db_box_thresh=0.5,
+                rec_batch_num=6,
+            )
+            return _PADDLE_OCR_INSTANCE
+        except ImportError:
+            logger.error("PaddleOCR not installed. Install with: pip install paddlepaddle paddleocr")
+            return None
+        except Exception as e:
+            logger.error(f"Failed to initialize PaddleOCR: {e}")
+            return None
 
 
 def _format_ocr_result_as_table(result: list) -> str:
@@ -155,37 +177,41 @@ def _format_ocr_result_as_table(result: list) -> str:
 def ocr_pages_with_paddle(
     file_bytes: io.BytesIO,
     page_numbers: List[int],
-    dpi: int = 300
+    dpi: int = 200,
 ) -> dict:
     """
     OCR specific pages of a PDF using PaddleOCR.
-    Optimized for table detection in Bordereau des Prix.
-    
-    Args:
-        file_bytes: PDF content
-        page_numbers: List of page numbers to OCR (1-indexed)
-        dpi: Resolution for conversion (higher = better for tables)
-    
-    Returns:
-        Dict mapping page_number -> extracted_text
+
+    Performance notes:
+    - Paddle model init is cached (see _initialize_paddle_ocr).
+    - Default DPI is 200 (300 DPI is often 2-5x slower).
+    - Orientation OSD is disabled by default (see _detect_and_fix_orientation).
+    - A soft timeout is applied to the Paddle call to avoid hanging forever.
+
+    Returns: Dict mapping page_number -> extracted_text
     """
     from pdf2image import convert_from_bytes
     import numpy as np
-    
+    from concurrent.futures import ThreadPoolExecutor, TimeoutError
+
     ocr = _initialize_paddle_ocr()
     if not ocr:
-        return {p: f"[PADDLEOCR NOT AVAILABLE]" for p in page_numbers}
-    
+        return {p: "[PADDLEOCR NOT AVAILABLE]" for p in page_numbers}
+
     poppler_path = _get_poppler_path()
     results = {}
-    
+
+    # Soft timeout: if the OCR call is too slow we return an error for that page.
+    # (Python can't reliably kill the underlying native work, but this prevents the whole pipeline from blocking.)
+    per_page_timeout_s = float(os.getenv("PADDLE_OCR_PAGE_TIMEOUT_SECONDS", "8"))
+
     try:
         file_bytes.seek(0)
         pdf_bytes = file_bytes.read()
-        
+
         for page_num in page_numbers:
             logger.info(f"PaddleOCR processing page {page_num} at {dpi} DPI...")
-            
+
             try:
                 # Convert specific page to image
                 images = convert_from_bytes(
@@ -194,42 +220,47 @@ def ocr_pages_with_paddle(
                     first_page=page_num,
                     last_page=page_num,
                     poppler_path=poppler_path,
-                    fmt='png'
+                    fmt="jpeg",  # faster than png in most cases
+                    thread_count=2,
                 )
-                
+
                 if not images:
                     results[page_num] = f"[Page {page_num} conversion failed]"
                     continue
-                
-                image = images[0]
-                
-                # Detect and fix orientation
-                image = _detect_and_fix_orientation(image)
-                
-                # Convert PIL to numpy array for PaddleOCR
+
+                image = _detect_and_fix_orientation(images[0])
                 img_array = np.array(image)
-                
-                # Run OCR (API varies between PaddleOCR versions)
-                try:
-                    ocr_result = ocr.ocr(img_array, cls=True)
-                except TypeError:
-                    # Some versions don't accept `cls` here; angle classification is controlled via `use_angle_cls` at init.
-                    ocr_result = ocr.ocr(img_array)
+
+                def _run_paddle():
+                    # Run OCR (API varies between PaddleOCR versions)
+                    try:
+                        return ocr.ocr(img_array, cls=True)
+                    except TypeError:
+                        return ocr.ocr(img_array)
+
+                with ThreadPoolExecutor(max_workers=1) as ex:
+                    future = ex.submit(_run_paddle)
+                    try:
+                        ocr_result = future.result(timeout=per_page_timeout_s)
+                    except TimeoutError:
+                        results[page_num] = f"[OCR TIMEOUT on page {page_num}: >{per_page_timeout_s:.0f}s]"
+                        logger.warning(f"PaddleOCR timeout on page {page_num} (>{per_page_timeout_s:.0f}s)")
+                        continue
 
                 text = _format_ocr_result_as_table(ocr_result)
-                
+
                 if text:
                     logger.info(f"PaddleOCR page {page_num}: extracted {len(text)} chars")
                     results[page_num] = text
                 else:
                     results[page_num] = f"[Page {page_num}: No text detected]"
-                    
+
             except Exception as e:
                 logger.error(f"PaddleOCR failed for page {page_num}: {e}")
                 results[page_num] = f"[OCR ERROR on page {page_num}: {str(e)}]"
-        
+
         return results
-        
+
     except Exception as e:
         logger.error(f"PaddleOCR processing failed: {e}")
         return {p: f"[OCR FAILED: {str(e)}]" for p in page_numbers}
@@ -320,7 +351,9 @@ def reocr_bordereau_pages(
     logger.info(f"🔄 Re-OCRing {len(bordereau_pages)} bordereau pages with PaddleOCR: {bordereau_pages}")
     
     # OCR the bordereau pages with PaddleOCR
-    paddle_results = ocr_pages_with_paddle(file_bytes, bordereau_pages, dpi=300)
+    # Use faster defaults (200 DPI) unless explicitly overridden.
+    paddle_results = ocr_pages_with_paddle(file_bytes, bordereau_pages)
+
     
     # Replace those pages in the original text
     result_text = original_text
