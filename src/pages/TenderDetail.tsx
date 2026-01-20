@@ -406,9 +406,11 @@ export default function TenderDetail() {
   const hasBordereauData = !!bordereauxMetadata && (bordereauxMetadata._completeness?.total_articles ?? 0) > 0;
   
   // Merge lots: base from avis, articles from bordereau
+  // ALSO include bordereau-only lots that don't exist in avis
   const mergedLots: MergedLot[] = useMemo(() => {
     const avisLots = avisMetadata?.lots || [];
     const bordereauxMap = new Map<string, BordereauItem[]>();
+    const usedBordereauxLots = new Set<string>();
     
     if (bordereauxMetadata?.lots_articles) {
       for (const lotArticle of bordereauxMetadata.lots_articles) {
@@ -416,10 +418,39 @@ export default function TenderDetail() {
       }
     }
     
-    return avisLots.map(lot => ({
-      ...lot,
-      articles: lot.numero_lot ? bordereauxMap.get(lot.numero_lot) : undefined
-    }));
+    // First, map avis lots and attach matching bordereau articles
+    const mappedAvisLots: MergedLot[] = avisLots.map(lot => {
+      const lotNum = lot.numero_lot;
+      if (lotNum && bordereauxMap.has(lotNum)) {
+        usedBordereauxLots.add(lotNum);
+      }
+      return {
+        ...lot,
+        articles: lotNum ? bordereauxMap.get(lotNum) : undefined
+      };
+    });
+    
+    // Then, add bordereau-only lots that weren't in avis
+    const bordereauxOnlyLots: MergedLot[] = [];
+    for (const [lotNum, articles] of bordereauxMap.entries()) {
+      if (!usedBordereauxLots.has(lotNum)) {
+        bordereauxOnlyLots.push({
+          numero_lot: lotNum,
+          objet_lot: null,
+          estimation_lot: null,
+          caution_provisoire: null,
+          articles
+        });
+      }
+    }
+    
+    // If avis has no lots but bordereau does, use bordereau lots only
+    if (mappedAvisLots.length === 0 && bordereauxOnlyLots.length > 0) {
+      return bordereauxOnlyLots;
+    }
+    
+    // Otherwise combine both
+    return [...mappedAvisLots, ...bordereauxOnlyLots];
   }, [avisMetadata, bordereauxMetadata]);
 
   // Total articles count
