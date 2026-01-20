@@ -209,10 +209,13 @@ def ocr_pages_with_paddle(
                 # Convert PIL to numpy array for PaddleOCR
                 img_array = np.array(image)
                 
-                # Run OCR
-                ocr_result = ocr.ocr(img_array, cls=True)
-                
-                # Format result preserving table structure
+                # Run OCR (API varies between PaddleOCR versions)
+                try:
+                    ocr_result = ocr.ocr(img_array, cls=True)
+                except TypeError:
+                    # Some versions don't accept `cls` here; angle classification is controlled via `use_angle_cls` at init.
+                    ocr_result = ocr.ocr(img_array)
+
                 text = _format_ocr_result_as_table(ocr_result)
                 
                 if text:
