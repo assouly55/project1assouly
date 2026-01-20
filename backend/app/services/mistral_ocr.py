@@ -12,10 +12,33 @@ from loguru import logger
 from app.core.config import settings
 
 
-def _pdf_page_to_base64(file_bytes: io.BytesIO, page_num: int = 1) -> str:
+def _detect_and_fix_orientation_pil(image):
+    """
+    Detect page orientation and rotate if needed.
+    Uses Tesseract OSD for detection.
+    """
+    try:
+        import pytesseract
+        
+        # Use OSD to detect rotation
+        osd_data = pytesseract.image_to_osd(image, output_type=pytesseract.Output.DICT)
+        rotation_angle = osd_data.get('rotate', 0)
+        orientation_conf = osd_data.get('orientation_conf', 0)
+        
+        if rotation_angle != 0 and orientation_conf > 1.0:
+            logger.info(f"Auto-rotating page by {rotation_angle}° (confidence: {orientation_conf:.1f})")
+            image = image.rotate(-rotation_angle, expand=True)
+        
+        return image
+    except Exception as e:
+        logger.debug(f"Orientation detection skipped: {e}")
+        return image
+
+
+def _pdf_page_to_base64(file_bytes: io.BytesIO, page_num: int = 1, fix_orientation: bool = True) -> str:
     """
     Convert a specific PDF page to base64 image for Mistral Vision API.
-    Uses pdf2image for conversion.
+    Uses pdf2image for conversion with automatic orientation detection.
     """
     from pdf2image import convert_from_bytes
     
@@ -33,10 +56,16 @@ def _pdf_page_to_base64(file_bytes: io.BytesIO, page_num: int = 1) -> str:
     if not images:
         return ""
     
+    image = images[0]
+    
+    # Detect and fix orientation for scanned landscape documents
+    if fix_orientation:
+        image = _detect_and_fix_orientation_pil(image)
+    
     # Convert PIL image to base64
     import io as io_module
     img_buffer = io_module.BytesIO()
-    images[0].save(img_buffer, format='PNG')
+    image.save(img_buffer, format='PNG')
     img_buffer.seek(0)
     
     return base64.b64encode(img_buffer.read()).decode('utf-8')
@@ -75,10 +104,12 @@ def _call_mistral_ocr(image_base64: str, page_info: str = "") -> str:
 {page_info}
 
 Instructions:
-- Extrais le texte exactement comme il apparaît
+- Si l'image semble être en orientation paysage ou tournée, lis le texte dans le bon sens
+- Extrait le texte exactement comme il apparaît
 - Préserve la structure (paragraphes, listes, tableaux)
 - Inclus tout texte en français, arabe ou anglais
 - Pour les tableaux, utilise | comme séparateur de colonnes
+- Pour un Bordereau des Prix, extrait CHAQUE ligne d'article avec son numéro, désignation, unité et quantité
 - N'ajoute aucune interprétation, seulement le texte brut
 
 Texte extrait:"""
@@ -92,7 +123,7 @@ Texte extrait:"""
                     ]
                 }
             ],
-            "max_tokens": 4096,
+            "max_tokens": 8192,  # Increased for larger documents
             "temperature": 0
         }
         

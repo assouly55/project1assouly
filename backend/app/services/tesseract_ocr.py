@@ -40,14 +40,55 @@ def _get_poppler_path() -> Optional[str]:
     return None  # Linux uses system PATH
 
 
-def _optimize_image_for_ocr(image, target_dpi: int = 300):
+def _detect_and_fix_orientation(image):
+    """
+    Detect page orientation using Tesseract OSD and rotate if needed.
+    Handles landscape scans that appear sideways.
+    
+    Returns rotated image if rotation was needed, otherwise original.
+    """
+    import pytesseract
+    from PIL import Image
+    
+    _configure_tesseract()
+    
+    try:
+        # Use OSD (Orientation and Script Detection) to detect rotation
+        # This requires the osd traineddata file
+        osd_data = pytesseract.image_to_osd(image, output_type=pytesseract.Output.DICT)
+        
+        rotation_angle = osd_data.get('rotate', 0)
+        orientation_conf = osd_data.get('orientation_conf', 0)
+        
+        logger.debug(f"OSD detected rotation: {rotation_angle}° (confidence: {orientation_conf})")
+        
+        # Only rotate if confidence is reasonable and rotation is needed
+        if rotation_angle != 0 and orientation_conf > 1.0:
+            logger.info(f"Auto-rotating image by {rotation_angle}° (confidence: {orientation_conf:.1f})")
+            # PIL rotates counter-clockwise, so we negate for clockwise correction
+            image = image.rotate(-rotation_angle, expand=True)
+        
+        return image
+        
+    except Exception as e:
+        # OSD can fail on some images - just continue without rotation
+        logger.debug(f"Orientation detection failed (non-critical): {e}")
+        return image
+
+
+def _optimize_image_for_ocr(image, target_dpi: int = 300, detect_orientation: bool = True):
     """
     Optimize image for OCR:
+    - Detect and fix orientation (landscape scans)
     - Convert to grayscale
     - Increase contrast
     - Apply thresholding for better text recognition
     """
     from PIL import Image, ImageEnhance, ImageFilter
+    
+    # First, detect and fix orientation (important for landscape scans)
+    if detect_orientation:
+        image = _detect_and_fix_orientation(image)
     
     # Convert to grayscale if not already
     if image.mode != 'L':
