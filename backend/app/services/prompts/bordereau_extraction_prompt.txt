@@ -97,13 +97,38 @@ Les données peuvent provenir de :
 4. Document PDF de bordereau
 
 ────────────────────────────────────────────
-FORMAT DU TEXTE EXCEL
+FORMAT DU TEXTE (EXCEL OU OCR)
 ────────────────────────────────────────────
 
 Si le texte provient d'un fichier Excel, il sera formaté comme :
 - Lignes séparées par des retours à la ligne
 - Colonnes séparées par des tabulations ou pipes |
 - En-têtes: N°, Désignation, Unité, Quantité, Prix Unitaire, etc.
+
+⚠️ DOCUMENTS SCANNÉS (OCR) - ATTENTION CRITIQUE:
+
+Les documents scannés peuvent avoir:
+- Texte mal aligné ou colonnes confondues
+- Ordre des colonnes différent de l'ordre visuel
+- Numéros de ligne séparés des désignations
+
+RÈGLE D'OR POUR LES TABLEAUX OCR:
+1. IDENTIFIE D'ABORD les en-têtes de colonnes pour comprendre l'ordre
+2. L'ordre TYPIQUE est: N° | Désignation | Unité | Quantité | Prix Unitaire
+3. MAIS certains tableaux ont: N° | Désignation | Quantité | Unité | Prix
+4. VÉRIFIE les en-têtes avant d'extraire!
+
+INDICES POUR IDENTIFIER LES COLONNES:
+- N°/Numéro: Toujours des chiffres séquentiels (1, 2, 3, 4...)
+- Désignation: Le texte le plus long de la ligne
+- Unité: Mots courts (U, UNITE, PIECE, RAME, ML, M², Kg, Fft, Boite, Paquet)
+- Quantité: Nombres (souvent avec virgule ou grands nombres: 100, 1725, 4500)
+- Prix Unitaire: Souvent vide "(à remplir)" ou montants en DH
+
+⚠️ ERREUR COMMUNE À ÉVITER:
+- NE PAS confondre le NUMÉRO de ligne avec un autre numéro du tableau
+- NE PAS prendre la quantité pour le numéro
+- NE PAS sauter de lignes - extraire TOUTES les lignes du tableau
 
 Extrais UNIQUEMENT : N°, Désignation, Unité, Quantité.
 IGNORE : Prix Unitaire, Montant Total, etc.
@@ -178,10 +203,14 @@ RÈGLES IMPORTANTES
 
 1. Copie la désignation EXACTEMENT comme écrite (pas de résumé)
 2. Garde le numéro du prix tel quel (peut être "1", "1.1", "A1", etc.)
-3. Unités courantes: U (unité), Kg, L, M, M2, M3, Km, Fft, Ens, etc.
+3. Unités courantes: U, UNITE, PIECE, Kg, L, M, ML, M2, M², M3, M³, Km, Fft, Ens, RAME, BOITE, PAQUET, etc.
 4. Si la quantité contient des décimales, les garder
 5. Ignorer les lignes de sous-total ou total
 6. NE PAS extraire les articles techniques du CPS (Article 1, 2, 3...)
+7. EXTRAIRE TOUTES LES LIGNES du tableau - ne pas sauter de numéros
+8. Si le tableau a 28 lignes numérotées, tu dois extraire 28 articles!
+9. Le numéro_prix doit être SÉQUENTIEL (1, 2, 3... ou 1.1, 1.2...)
+10. VÉRIFIER que les numéros vont de 1 jusqu'au dernier sans trous
 
 ────────────────────────────────────────────
 SORTIE

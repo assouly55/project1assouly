@@ -103,13 +103,19 @@ def _call_mistral_ocr(image_base64: str, page_info: str = "") -> str:
                             "text": f"""Extrait TOUT le texte visible dans cette image de document. 
 {page_info}
 
-Instructions:
+Instructions CRITIQUES pour les tableaux (Bordereau des Prix):
+- IDENTIFIE d'abord les EN-TÊTES de colonnes du tableau
+- L'ordre typique est: N° | Désignation | Unité | Quantité | Prix Unitaire
+- MAIS certains tableaux peuvent avoir un ordre différent - VÉRIFIE les en-têtes!
+- Utilise | comme séparateur de colonnes en RESPECTANT L'ORDRE DES EN-TÊTES
+- Extrait CHAQUE ligne du tableau - si le tableau va de 1 à 28, extrais les 28 lignes
+- NE SAUTE AUCUNE LIGNE même si le texte est difficile à lire
+
+Instructions générales:
 - Si l'image semble être en orientation paysage ou tournée, lis le texte dans le bon sens
 - Extrait le texte exactement comme il apparaît
 - Préserve la structure (paragraphes, listes, tableaux)
 - Inclus tout texte en français, arabe ou anglais
-- Pour les tableaux, utilise | comme séparateur de colonnes
-- Pour un Bordereau des Prix, extrait CHAQUE ligne d'article avec son numéro, désignation, unité et quantité
 - N'ajoute aucune interprétation, seulement le texte brut
 
 Texte extrait:"""
