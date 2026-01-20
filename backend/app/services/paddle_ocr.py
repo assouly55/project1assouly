@@ -59,6 +59,10 @@ def _initialize_paddle_ocr():
     Returns configured OCR instance.
     """
     try:
+        # Disable model source check to speed up initialization
+        import os
+        os.environ["DISABLE_MODEL_SOURCE_CHECK"] = "True"
+        
         from paddleocr import PaddleOCR
         
         # Initialize with multilingual support
@@ -72,7 +76,6 @@ def _initialize_paddle_ocr():
             det_db_thresh=0.3,  # Lower threshold for better table line detection
             det_db_box_thresh=0.5,
             rec_batch_num=6,
-            max_text_length=100,
         )
         return ocr
     except ImportError:
