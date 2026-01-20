@@ -150,10 +150,19 @@ FILENAME_PATTERNS = {
 }
 
 
+def is_excel_file(filename: str) -> bool:
+    """Check if file is an Excel spreadsheet (likely bordereau des prix)."""
+    fname_lower = filename.lower()
+    return fname_lower.endswith(('.xlsx', '.xls', '.csv'))
+
+
 def classify_document(text: str, filename: str = "", use_ai: bool = False, is_scanned: bool = False) -> DocumentType:
     """
     Classify document type by scanning first-page content and filename.
     Priority: AVIS > RC > CPS > other document types
+    
+    IMPORTANT: Excel files (.xlsx, .xls) are classified as BPDE (Bordereau des Prix)
+    since they typically contain the price schedule data.
     
     Args:
         text: First page text content
@@ -166,6 +175,11 @@ def classify_document(text: str, filename: str = "", use_ai: bool = False, is_sc
     
     # Extract just the file name without path
     base_filename = filename_lower.split('/')[-1].split('\\')[-1]
+    
+    # PRIORITY 0: Excel files are almost always Bordereau des Prix
+    if is_excel_file(filename):
+        logger.info(f"Excel file detected, classifying as BPDE: {filename}")
+        return DocumentType.BPDE
     
     # All document types to check
     all_doc_types = [

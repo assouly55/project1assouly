@@ -252,22 +252,23 @@ class AIService:
         processed_count = 0
         primary_source = None
         
-        # Define processing order: CPS first → Excel → RC → BPU/DQE → Others
+        # Define processing order: Excel FIRST → CPS → BPDE → RC → Others
+        # Excel files are most likely to contain structured bordereau data
         def get_priority(doc: Dict) -> int:
             fname = doc.get("filename", "").lower()
             doc_type = doc.get("document_type", "").upper()
             
-            # CPS first (Bordereau is usually at the end of CPS)
-            if doc_type == "CPS" or "cps" in fname.split('.')[0].lower() or "cahier" in fname:
+            # Excel files FIRST (highest priority - structured bordereau data)
+            if fname.endswith(('.xlsx', '.xls', '.csv')) or doc_type == "BPDE":
                 return 0
-            # Excel files second
-            if fname.endswith(('.xlsx', '.xls', '.csv')):
+            # CPS second (Bordereau is usually at the end of CPS)
+            if doc_type == "CPS" or "cps" in fname.split('.')[0].lower() or "cahier" in fname:
                 return 1
-            # RC third
-            if doc_type == "RC" or "reglement" in fname or "rc" in fname.split('.')[0].lower():
+            # BPU/DQE/BQ third
+            if doc_type in ["BPU", "DQE", "BQ"]:
                 return 2
-            # BPU/DQE fourth
-            if doc_type in ["BPU", "DQE", "BPDE", "BQ"]:
+            # RC fourth
+            if doc_type == "RC" or "reglement" in fname or "rc" in fname.split('.')[0].lower():
                 return 3
             # Everything else last
             return 10
@@ -275,7 +276,7 @@ class AIService:
         # Sort documents by priority
         sorted_docs = sorted(documents, key=get_priority)
         
-        logger.info(f"📋 Processing order: {[d.get('filename', 'unknown') for d in sorted_docs[:5]]}")
+        logger.info(f"📋 Processing order (Excel first): {[d.get('filename', 'unknown') for d in sorted_docs[:5]]}")
         
         for doc in sorted_docs:
             content = doc.get("raw_text", "")
@@ -460,6 +461,102 @@ class AIService:
                     target[lot_num].append(art)
                     existing_nums.add(art.get("numero_prix"))
     
+    def extract_bordereau_focused_retry(
+        self,
+        documents: List[Dict],
+        existing_lots: Optional[List[str]] = None
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Focused retry: When initial extraction found no bordereau items,
+        do a more thorough search across ALL documents without early stopping.
+        
+        This method:
+        1. Skips the indicator pre-check (force extraction attempt)
+        2. Processes ALL documents (no early stopping)
+        3. Uses longer context windows
+        
+        Args:
+            documents: List of processed documents with raw_text
+            existing_lots: Lot numbers from Phase 1
+            
+        Returns:
+            Dict with lots_articles structure, or None if still nothing found
+        """
+        logger.info("=" * 60)
+        logger.info("🔄 FOCUSED RETRY: Deep Bordereau Search (No Indicators Check)")
+        logger.info("=" * 60)
+        
+        all_lots_articles = {}
+        processed_count = 0
+        
+        # Process ALL documents without skipping based on indicators
+        for doc in documents:
+            content = doc.get("raw_text", "")
+            filename = doc.get("filename", "unknown")
+            doc_type = doc.get("document_type", "UNKNOWN")
+            
+            # Skip empty or too short content
+            if not content or len(content.strip()) < 100:
+                continue
+            
+            logger.info(f"📄 [RETRY] Processing: {filename} ({doc_type}, {len(content)} chars)")
+            processed_count += 1
+            
+            # Force extraction WITHOUT indicator check
+            logger.info(f"   🤖 Force extracting from {filename}...")
+            
+            # Feed the whole document (up to token limit) to extraction AI
+            response = self._call_ai(
+                get_bordereau_extraction_prompt(),
+                f"DOCUMENT: {filename} ({doc_type})\n\n"
+                f"IMPORTANT: Cherchez TOUT tableau contenant des prix, quantités, unités.\n"
+                f"Même si le document ne semble pas être un bordereau des prix standard.\n\n"
+                f"CONTENU COMPLET DU DOCUMENT:\n\n{content[:60000]}",
+                max_tokens=8192
+            )
+            
+            if response:
+                result = self._parse_json_response(response)
+                if result:
+                    items_found = sum(len(la.get("articles", [])) for la in result.get("lots_articles", []))
+                    if items_found > 0:
+                        logger.info(f"   ✅ [RETRY] Found {items_found} items in {filename}")
+                        self._merge_lots_articles(all_lots_articles, result)
+        
+        # Build final result
+        final_result = {
+            "lots_articles": [
+                {
+                    "numero_lot": lot_num,
+                    "articles": articles
+                }
+                for lot_num, articles in sorted(all_lots_articles.items())
+            ]
+        }
+        
+        # Ensure at least empty lots from Phase 1
+        if not final_result["lots_articles"] and existing_lots:
+            final_result["lots_articles"] = [
+                {"numero_lot": lot_num, "articles": []}
+                for lot_num in existing_lots
+            ]
+        
+        # Add completeness info
+        total_articles = sum(len(la["articles"]) for la in final_result["lots_articles"])
+        final_result["_completeness"] = {
+            "is_complete": total_articles > 0,
+            "total_articles": total_articles,
+            "lots_count": len(final_result["lots_articles"]),
+            "files_processed": processed_count,
+            "is_retry": True
+        }
+        
+        logger.info("=" * 60)
+        logger.info(f"🔄 Retry complete: {total_articles} items found")
+        logger.info("=" * 60)
+        
+        return final_result if total_articles > 0 else None
+
     # Legacy method for backward compatibility
     def extract_bordereau_items(
         self,

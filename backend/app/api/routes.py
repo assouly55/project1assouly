@@ -224,6 +224,8 @@ async def _process_single_tender(
             logger.info(f"[{idx}] Scraped metadata: {tender_ref}")
             
             # Step 2: Create tender record (PENDING status until fully processed)
+            # Use flush() instead of commit() so we can rollback if processing fails
+            # The tender won't be visible to other sessions until final commit
             tender = Tender(
                 external_reference=tender_ref,
                 source_url=tender_url,
@@ -231,8 +233,7 @@ async def _process_single_tender(
                 download_date=download_date,
             )
             db.add(tender)
-            db.commit()
-            db.refresh(tender)
+            db.flush()  # Get ID without committing - allows rollback on failure
             
             # Step 3: Extract Phase 1 metadata from WEBSITE ONLY first
             merged_metadata = None
@@ -304,6 +305,7 @@ async def _process_single_tender(
                         })
                 
                 # Step 5: Run Phase 2 - Bordereau extraction (always run if we have docs)
+                bordereau_result = None
                 if documents_for_phase2:
                     logger.info(f"[{idx}] Phase 2: Extracting bordereau items...")
                     
@@ -316,16 +318,34 @@ async def _process_single_tender(
                             if lot.get("lot_number")
                         ]
                     
-                    # Run smart bordereau extraction
+                    # Run smart bordereau extraction (Excel first, then CPS)
                     bordereau_result = ai_service.extract_bordereau_items_smart(
                         documents_for_phase2,
                         existing_lots=existing_lots
                     )
                     
+                    # Check if extraction was successful
+                    items_found = 0
                     if bordereau_result:
+                        items_found = bordereau_result.get('_completeness', {}).get('total_articles', 0)
+                        logger.info(f"[{idx}] ✓ Initial extraction: {items_found} items")
+                    
+                    # If no items found, try focused retry (deeper search without indicator check)
+                    if items_found == 0:
+                        logger.warning(f"[{idx}] ⚠ No bordereau items found, running focused retry...")
+                        retry_result = ai_service.extract_bordereau_focused_retry(
+                            documents_for_phase2,
+                            existing_lots=existing_lots
+                        )
+                        if retry_result:
+                            bordereau_result = retry_result
+                            items_found = retry_result.get('_completeness', {}).get('total_articles', 0)
+                            logger.info(f"[{idx}] ✓ Focused retry found {items_found} items")
+                    
+                    if bordereau_result and items_found > 0:
                         tender.bordereau_metadata = bordereau_result
                         tender.universal_metadata = bordereau_result  # Backward compat
-                        logger.info(f"[{idx}] ✓ Extracted {bordereau_result.get('_completeness', {}).get('total_articles', 0)} items")
+                        logger.info(f"[{idx}] ✓ Final bordereau: {items_found} items")
                 
                 # Step 6: ONLY if Phase 1 incomplete, use document fallbacks
                 if not website_complete and documents:
