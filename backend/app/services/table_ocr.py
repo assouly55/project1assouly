@@ -224,16 +224,28 @@ def _detect_cells_in_table(table_mask: np.ndarray, offset_x: int, offset_y: int)
 
 def extract_table_with_structure(
     image: Image.Image,
-    dpi: int = 200
+    dpi: int = 200,
+    *,
+    max_cells: int = 250,
+    max_seconds_per_table: float = 4.0,
+    per_cell_timeout_s: float = 0.6,
 ) -> Dict[str, Any]:
     """
     Extract table data with full structure preservation.
     Uses OpenCV for grid detection and Tesseract for cell OCR.
-    
+
+    Performance notes:
+    - Cell-by-cell OCR can explode on dense/dirty tables.
+    - We bound work via max_cells + max_seconds_per_table.
+    - Each Tesseract call has a hard timeout (kills the subprocess).
+
     Args:
         image: PIL Image of the page
         dpi: Resolution (affects cell extraction accuracy)
-    
+        max_cells: Hard cap of OCR'd cells per table (fallback when exceeded)
+        max_seconds_per_table: Hard cap of wall time per table
+        per_cell_timeout_s: Hard timeout per Tesseract call
+
     Returns:
         Dict with:
         - tables: List of table data with cells
@@ -241,22 +253,27 @@ def extract_table_with_structure(
         - metadata: Table boundaries and structure info
     """
     import pytesseract
-    
+    import time
+
     _configure_tesseract()
-    
+
     # Fix orientation
     image = _fast_orientation_fix(image)
-    
+
     # Convert to numpy array
     img_array = np.array(image)
-    
+
     # Detect table structures
     tables = detect_table_structure(img_array)
-    
+
     result_tables = []
     all_text_lines = []
-    
+
     for table_idx, table in enumerate(tables):
+        table_start = time.monotonic()
+        truncated = False
+        truncate_reason = ""
+
         table_data = {
             "table_index": table_idx,
             "bounds": {
@@ -265,13 +282,25 @@ def extract_table_with_structure(
             },
             "rows": table.rows,
             "cols": table.cols,
-            "cells": []
+            "cells": [],
+            "truncated": False,
+            "truncate_reason": None,
         }
-        
+
         # OCR each cell
-        row_texts = {}
-        
-        for cell in table.cells:
+        row_texts: Dict[int, List[Tuple[int, str]]] = {}
+
+        for cell_idx, cell in enumerate(table.cells):
+            # Hard limits to prevent pathological pages from stalling the pipeline
+            if cell_idx >= max_cells:
+                truncated = True
+                truncate_reason = f"max_cells_exceeded({max_cells})"
+                break
+            if (time.monotonic() - table_start) > max_seconds_per_table:
+                truncated = True
+                truncate_reason = f"max_seconds_per_table_exceeded({max_seconds_per_table:.1f}s)"
+                break
+
             # Extract cell region
             cell_img = image.crop((
                 max(0, cell.x - 2),
@@ -279,49 +308,60 @@ def extract_table_with_structure(
                 min(image.width, cell.x + cell.width + 2),
                 min(image.height, cell.y + cell.height + 2)
             ))
-            
-            # OCR the cell
+
+            # OCR the cell (hard timeout supported by pytesseract)
             try:
                 cell_text = pytesseract.image_to_string(
                     cell_img,
                     lang="fra+eng",
-                    config="--psm 6 --oem 1"  # PSM 6: single block of text
+                    config="--psm 6 --oem 1",
+                    timeout=per_cell_timeout_s,
                 ).strip()
             except Exception:
                 cell_text = ""
-            
+
             cell.text = cell_text
-            
+
             table_data["cells"].append({
                 "row": cell.row,
                 "col": cell.col,
                 "x": cell.x, "y": cell.y,
                 "width": cell.width, "height": cell.height,
-                "text": cell_text
+                "text": cell_text,
             })
-            
+
             # Group by row for text output
-            if cell.row not in row_texts:
-                row_texts[cell.row] = []
-            row_texts[cell.row].append((cell.col, cell_text))
-        
+            row_texts.setdefault(cell.row, []).append((cell.col, cell_text))
+
+        if truncated:
+            table_data["truncated"] = True
+            table_data["truncate_reason"] = truncate_reason
+            logger.warning(f"TableOCR: Truncated table {table_idx} ({truncate_reason})")
+
         # Build pipe-delimited text for this table
         for row_idx in sorted(row_texts.keys()):
             row_cells = sorted(row_texts[row_idx], key=lambda x: x[0])
             row_text = " | ".join(text for _, text in row_cells)
             all_text_lines.append(row_text)
-        
+
+        # If we had to truncate heavily, add a marker line to keep downstream context
+        if truncated:
+            all_text_lines.append(f"[TABLE_OCR_TRUNCATED: {truncate_reason}]")
+
         result_tables.append(table_data)
         all_text_lines.append("")  # Empty line between tables
-    
+
     return {
         "tables": result_tables,
         "text": "\n".join(all_text_lines),
         "metadata": {
             "tables_found": len(tables),
-            "total_cells": sum(len(t.cells) for t in tables)
-        }
+            "total_cells": sum(len(t.cells) for t in tables),
+            "max_cells": max_cells,
+            "max_seconds_per_table": max_seconds_per_table,
+        },
     }
+
 
 
 def ocr_page_with_table_detection(
@@ -377,29 +417,36 @@ def ocr_pages_with_table_extraction(
 ) -> Dict[int, str]:
     """
     OCR specific pages of a PDF with table structure detection.
-    Replacement for PaddleOCR's ocr_pages_with_paddle function.
-    
+
+    IMPORTANT:
+    - We do NOT use ThreadPoolExecutor timeouts here because Python threads
+      cannot be killed and the executor shutdown would still block.
+    - Instead, we enforce real hard timeouts by passing `timeout=` to
+      pytesseract calls inside extract_table_with_structure().
+
     Args:
         file_bytes: PDF content as BytesIO
         page_numbers: List of page numbers to OCR (1-indexed)
         dpi: Resolution for conversion
-        timeout_per_page: Max seconds per page before timeout
-    
+        timeout_per_page: Best-effort overall budget (used for heuristics/logging)
+
     Returns:
         Dict mapping page_number -> extracted_text
     """
     from pdf2image import convert_from_bytes
-    
+    import time
+
     poppler_path = _get_poppler_path()
-    results = {}
-    
+    results: Dict[int, str] = {}
+
     try:
         file_bytes.seek(0)
         pdf_bytes = file_bytes.read()
-        
+
         for page_num in page_numbers:
+            page_start = time.monotonic()
             logger.info(f"TableOCR processing page {page_num} at {dpi} DPI...")
-            
+
             try:
                 # Convert page to image
                 images = convert_from_bytes(
@@ -409,43 +456,40 @@ def ocr_pages_with_table_extraction(
                     last_page=page_num,
                     poppler_path=poppler_path,
                     fmt="jpeg",
-                    thread_count=2
+                    thread_count=2,
                 )
-                
+
                 if not images:
                     results[page_num] = f"[Page {page_num} conversion failed]"
                     continue
-                
+
                 image = images[0]
-                
-                # Run OCR with timeout
-                def _run_ocr():
-                    return ocr_page_with_table_detection(image)
-                
-                with ThreadPoolExecutor(max_workers=1) as ex:
-                    future = ex.submit(_run_ocr)
-                    try:
-                        text = future.result(timeout=timeout_per_page)
-                    except FuturesTimeout:
-                        results[page_num] = f"[OCR TIMEOUT on page {page_num}: >{timeout_per_page:.0f}s]"
-                        logger.warning(f"TableOCR timeout on page {page_num}")
-                        continue
-                
+
+                # Run OCR (bounded + hard per-cell timeouts)
+                text = ocr_page_with_table_detection(image)
+
+                elapsed = time.monotonic() - page_start
+                if elapsed > timeout_per_page:
+                    logger.warning(
+                        f"TableOCR page {page_num} exceeded budget: {elapsed:.1f}s > {timeout_per_page:.1f}s"
+                    )
+
                 if text:
                     logger.info(f"TableOCR page {page_num}: extracted {len(text)} chars")
                     results[page_num] = text
                 else:
                     results[page_num] = f"[Page {page_num}: No text detected]"
-                    
+
             except Exception as e:
                 logger.error(f"TableOCR failed for page {page_num}: {e}")
                 results[page_num] = f"[OCR ERROR on page {page_num}: {str(e)}]"
-        
+
         return results
-        
+
     except Exception as e:
         logger.error(f"TableOCR processing failed: {e}")
         return {p: f"[OCR FAILED: {str(e)}]" for p in page_numbers}
+
 
 
 def detect_bordereau_pages(full_text: str) -> List[int]:
