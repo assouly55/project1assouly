@@ -892,20 +892,31 @@ def get_tender(tender_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/api/tenders/{tender_id}/analyze")
-def analyze_tender(tender_id: str, db: Session = Depends(get_db)):
+def analyze_tender(tender_id: str, force: bool = False, db: Session = Depends(get_db)):
     """
     Trigger smart Phase 2 analysis using article-based approach.
     
     Flow:
-    1. Check if documents and article index exist
-    2. Use article index to target relevant sections
-    3. Extract universal metadata from targeted articles
+    1. Check if already analyzed (skip unless force=true)
+    2. Check if documents and article index exist
+    3. Use article index to target relevant sections
+    4. Extract universal metadata from targeted articles
     """
     from loguru import logger
     
     tender = db.query(Tender).filter(Tender.id == tender_id).first()
     if not tender:
         raise HTTPException(404, "Tender not found")
+    
+    # Skip if already analyzed (unless force=true)
+    if tender.status == TenderStatus.ANALYZED and tender.bordereau_metadata and not force:
+        logger.info(f"⏭️ Tender {tender_id} already ANALYZED, skipping (use force=true to re-analyze)")
+        return {
+            "success": True,
+            "phase": "phase2_skipped",
+            "message": "Tender already analyzed",
+            "tender": _tender_to_dict(tender)
+        }
     
     documents = list(tender.documents)
     
