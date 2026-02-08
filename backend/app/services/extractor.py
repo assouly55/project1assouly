@@ -664,7 +664,7 @@ def _extract_full_pdf_digital(file_bytes: io.BytesIO) -> Tuple[str, int]:
 def _extract_full_pdf_ocr(file_bytes: io.BytesIO) -> Tuple[str, int]:
     """
     Full OCR extraction from scanned PDF.
-    Uses Tesseract for initial OCR, then PaddleOCR for bordereau pages.
+    Uses Tesseract for initial OCR, then OpenCV+Tesseract table extraction for bordereau pages.
     """
     try:
         from app.services.tesseract_ocr import ocr_full_pdf_tesseract_parallel
@@ -675,23 +675,23 @@ def _extract_full_pdf_ocr(file_bytes: io.BytesIO) -> Tuple[str, int]:
         if not text or "[OCR FAILED" in text:
             return text, page_count
         
-        # Step 2: Detect and re-OCR bordereau pages with PaddleOCR
+        # Step 2: Detect and re-OCR bordereau pages with table extraction
         try:
-            from app.services.paddle_ocr import reocr_bordereau_pages
+            from app.services.table_ocr import reocr_bordereau_pages
             
             file_bytes.seek(0)
             enhanced_text = reocr_bordereau_pages(file_bytes, text)
             
             if enhanced_text != text:
-                logger.info("✅ Bordereau pages enhanced with PaddleOCR")
+                logger.info("✅ Bordereau pages enhanced with TableOCR")
             
             return enhanced_text, page_count
             
         except ImportError:
-            logger.warning("PaddleOCR not available, using Tesseract results only")
+            logger.warning("TableOCR not available, using Tesseract results only")
             return text, page_count
         except Exception as e:
-            logger.warning(f"PaddleOCR enhancement failed, using Tesseract: {e}")
+            logger.warning(f"TableOCR enhancement failed, using Tesseract: {e}")
             return text, page_count
         
     except Exception as e:
