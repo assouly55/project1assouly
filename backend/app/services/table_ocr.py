@@ -1,74 +1,108 @@
 """
-Tender AI Platform - OpenCV + Tesseract Table OCR
-High-performance table extraction using OpenCV for structure detection
-and Tesseract for cell-by-cell OCR. Replaces PaddleOCR.
+Tender AI Platform — Coordinate-Based Table OCR
+================================================
+Converts scanned PDF tables into structured LaTeX using a 4-phase pipeline:
 
-Performance target: ~5 seconds per page
+  Phase 1 — Shape Detection   : OpenCV finds lines/borders → virtual grid
+  Phase 2 — Text Extraction   : Tesseract extracts words with bounding boxes
+  Phase 3 — Coordinate Merge  : Assigns each word to the correct grid cell
+  Phase 4 — LaTeX Output      : Deterministic, AI-parseable table format
+
+Performance target: < 5 s per page.
+Tools: OpenCV (free), Tesseract (free), no paid APIs.
 """
 
 import io
 import os
-import threading
-from typing import Tuple, List, Optional, Dict, Any
-from dataclasses import dataclass
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
+import re
+import time
+import platform
+from typing import List, Optional, Dict, Any, Tuple
+from dataclasses import dataclass, field
 from loguru import logger
 
 import numpy as np
 from PIL import Image
 
-# Detect OS and set paths
-import platform
+# ---------------------------------------------------------------------------
+# Platform paths
+# ---------------------------------------------------------------------------
 IS_WINDOWS = platform.system() == "Windows"
-
-# Paths for Windows
 TESSERACT_PATH_WIN = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
 POPPLER_PATH_WIN = r"C:\poppler-24.08.0\Library\bin"
 
 
-@dataclass
-class TableCell:
-    """Represents a single cell in a detected table."""
-    x: int
-    y: int
-    width: int
-    height: int
-    row: int
-    col: int
-    text: str = ""
-
-
-@dataclass
-class TableRegion:
-    """Represents a detected table with its cells."""
-    x: int
-    y: int
-    width: int
-    height: int
-    cells: List[TableCell]
-    rows: int = 0
-    cols: int = 0
-
-
 def _get_poppler_path() -> Optional[str]:
-    """Get Poppler path based on OS."""
     if IS_WINDOWS and os.path.exists(POPPLER_PATH_WIN):
         return POPPLER_PATH_WIN
     return None
 
 
 def _configure_tesseract():
-    """Configure Tesseract path based on OS."""
     import pytesseract
     if IS_WINDOWS and os.path.exists(TESSERACT_PATH_WIN):
         pytesseract.pytesseract.tesseract_cmd = TESSERACT_PATH_WIN
 
 
+# ---------------------------------------------------------------------------
+# Data models
+# ---------------------------------------------------------------------------
+@dataclass
+class GridLine:
+    """A detected horizontal or vertical line segment."""
+    x1: int
+    y1: int
+    x2: int
+    y2: int
+    orientation: str  # "H" or "V"
+
+
+@dataclass
+class GridCell:
+    """A cell in the virtual grid with its bounding box."""
+    row: int
+    col: int
+    x: int
+    y: int
+    w: int
+    h: int
+    words: List[str] = field(default_factory=list)
+
+    @property
+    def text(self) -> str:
+        return " ".join(self.words)
+
+
+@dataclass
+class WordBox:
+    """A word extracted by Tesseract with its bounding box."""
+    text: str
+    x: int
+    y: int
+    w: int
+    h: int
+    conf: int
+
+
+@dataclass
+class DetectedTable:
+    """A fully reconstructed table."""
+    x: int
+    y: int
+    w: int
+    h: int
+    rows: int
+    cols: int
+    cells: List[GridCell]
+    latex: str = ""
+
+
+# ===================================================================
+# PHASE 1 — Shape Detection (OpenCV)
+# ===================================================================
+
 def _fast_orientation_fix(image: Image.Image) -> Image.Image:
-    """
-    Fast orientation correction using aspect ratio heuristic.
-    Rotates landscape images 90° (faster than Tesseract OSD).
-    """
+    """Rotate landscape pages 90° (fast heuristic, no OSD)."""
     w, h = image.size
     if w > h * 1.20:
         logger.info("TableOCR: Rotating landscape page by 90°")
@@ -76,365 +110,405 @@ def _fast_orientation_fix(image: Image.Image) -> Image.Image:
     return image
 
 
-def _preprocess_for_table_detection(img_array: np.ndarray) -> np.ndarray:
+def _detect_lines(binary: np.ndarray) -> Tuple[List[int], List[int]]:
     """
-    Preprocess image for table/grid detection.
-    Converts to binary and enhances lines.
+    Detect horizontal and vertical line positions using morphology.
+    Returns (sorted list of Y positions, sorted list of X positions).
     """
     import cv2
-    
-    # Convert to grayscale if needed
-    if len(img_array.shape) == 3:
-        gray = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
-    else:
-        gray = img_array.copy()
-    
-    # Apply adaptive thresholding for better line detection
+
+    h, w = binary.shape
+
+    # --- Horizontal lines ---
+    h_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (max(w // 25, 30), 1))
+    h_lines = cv2.morphologyEx(binary, cv2.MORPH_OPEN, h_kernel)
+    h_lines = cv2.dilate(h_lines, cv2.getStructuringElement(cv2.MORPH_RECT, (1, 3)), iterations=1)
+
+    # Project horizontally — each row with enough white pixels is a line
+    h_proj = np.sum(h_lines, axis=1)
+    h_threshold = w * 0.15 * 255  # at least 15 % of width
+    h_positions = _cluster_positions(np.where(h_proj > h_threshold)[0], min_gap=8)
+
+    # --- Vertical lines ---
+    v_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, max(h // 25, 30)))
+    v_lines = cv2.morphologyEx(binary, cv2.MORPH_OPEN, v_kernel)
+    v_lines = cv2.dilate(v_lines, cv2.getStructuringElement(cv2.MORPH_RECT, (3, 1)), iterations=1)
+
+    v_proj = np.sum(v_lines, axis=0)
+    v_threshold = h * 0.15 * 255
+    v_positions = _cluster_positions(np.where(v_proj > v_threshold)[0], min_gap=8)
+
+    return h_positions, v_positions
+
+
+def _cluster_positions(positions: np.ndarray, min_gap: int = 8) -> List[int]:
+    """Cluster nearby pixel positions into single line coordinates."""
+    if len(positions) == 0:
+        return []
+    clusters: List[List[int]] = [[int(positions[0])]]
+    for p in positions[1:]:
+        if int(p) - clusters[-1][-1] <= min_gap:
+            clusters[-1].append(int(p))
+        else:
+            clusters.append([int(p)])
+    # Use median of each cluster
+    return [int(np.median(c)) for c in clusters]
+
+
+def _build_virtual_grid(
+    h_positions: List[int],
+    v_positions: List[int],
+    img_h: int,
+    img_w: int,
+) -> List[GridCell]:
+    """
+    Build a grid of cells from detected line positions.
+    Each cell is the rectangle between consecutive H and V lines.
+    """
+    # We need at least 2 horizontal and 2 vertical lines to form cells
+    if len(h_positions) < 2 or len(v_positions) < 2:
+        return []
+
+    cells: List[GridCell] = []
+    for ri in range(len(h_positions) - 1):
+        for ci in range(len(v_positions) - 1):
+            y1 = h_positions[ri]
+            y2 = h_positions[ri + 1]
+            x1 = v_positions[ci]
+            x2 = v_positions[ci + 1]
+            # Skip tiny slivers
+            if (y2 - y1) < 8 or (x2 - x1) < 8:
+                continue
+            cells.append(GridCell(
+                row=ri, col=ci,
+                x=x1, y=y1,
+                w=x2 - x1, h=y2 - y1,
+            ))
+    return cells
+
+
+def detect_grid(image: Image.Image) -> Tuple[List[GridCell], List[int], List[int]]:
+    """
+    Phase 1: Detect table grid structure from a page image.
+
+    Returns:
+        (cells, h_positions, v_positions)
+    """
+    import cv2
+
+    img_array = np.array(image.convert("L"))
+    # Adaptive threshold → binary (white text/lines on black)
     binary = cv2.adaptiveThreshold(
-        gray, 255,
+        img_array, 255,
         cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
         cv2.THRESH_BINARY_INV,
-        15, 10
+        15, 10,
     )
-    
-    return binary
+
+    h_positions, v_positions = _detect_lines(binary)
+    logger.debug(
+        f"Phase1: detected {len(h_positions)} H-lines, {len(v_positions)} V-lines"
+    )
+
+    cells = _build_virtual_grid(h_positions, v_positions, *binary.shape)
+    return cells, h_positions, v_positions
 
 
-def detect_table_structure(img_array: np.ndarray) -> List[TableRegion]:
+# ===================================================================
+# PHASE 2 — Text Extraction (Tesseract word boxes)
+# ===================================================================
+
+def extract_word_boxes(image: Image.Image, timeout_s: float = 6.0) -> List[WordBox]:
     """
-    Detect table grid structure using OpenCV morphological operations.
-    Finds horizontal and vertical lines to identify table cells.
-    
-    Args:
-        img_array: NumPy array of the image (RGB or grayscale)
-    
-    Returns:
-        List of TableRegion objects with cell coordinates
+    Phase 2: Run Tesseract once on the full page image and return
+    every detected word with its bounding box and confidence.
     """
-    import cv2
-    
-    binary = _preprocess_for_table_detection(img_array)
-    height, width = binary.shape[:2]
-    
-    # Detect horizontal lines
-    horizontal_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (width // 30, 1))
-    horizontal_lines = cv2.morphologyEx(binary, cv2.MORPH_OPEN, horizontal_kernel)
-    horizontal_lines = cv2.dilate(horizontal_lines, horizontal_kernel, iterations=2)
-    
-    # Detect vertical lines
-    vertical_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, height // 30))
-    vertical_lines = cv2.morphologyEx(binary, cv2.MORPH_OPEN, vertical_kernel)
-    vertical_lines = cv2.dilate(vertical_lines, vertical_kernel, iterations=2)
-    
-    # Combine lines to get table grid
-    table_mask = cv2.add(horizontal_lines, vertical_lines)
-    
-    # Find contours of potential table regions
-    contours, _ = cv2.findContours(table_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    
-    tables = []
-    min_table_area = (width * height) * 0.01  # At least 1% of page
-    
-    for contour in contours:
-        x, y, w, h = cv2.boundingRect(contour)
-        area = w * h
-        
-        if area < min_table_area:
+    import pytesseract
+
+    _configure_tesseract()
+
+    try:
+        data = pytesseract.image_to_data(
+            image,
+            lang="fra+eng",
+            config="--oem 1 --psm 6",
+            output_type=pytesseract.Output.DICT,
+            timeout=timeout_s,
+        )
+    except Exception as e:
+        logger.error(f"Phase2 Tesseract failed: {e}")
+        return []
+
+    words: List[WordBox] = []
+    n = len(data["text"])
+    for i in range(n):
+        txt = (data["text"][i] or "").strip()
+        if not txt:
             continue
-            
-        # Extract table region for cell detection
-        table_region = table_mask[y:y+h, x:x+w]
-        cells = _detect_cells_in_table(table_region, x, y)
-        
-        if cells:
-            # Calculate rows and cols
-            rows = len(set(c.row for c in cells))
-            cols = len(set(c.col for c in cells))
-            
-            tables.append(TableRegion(
-                x=x, y=y, width=w, height=h,
-                cells=cells, rows=rows, cols=cols
-            ))
-    
-    return tables
+        conf = int(data["conf"][i]) if data["conf"][i] != "-1" else 0
+        if conf < 20:
+            continue  # skip very low-confidence junk
+        words.append(WordBox(
+            text=txt,
+            x=int(data["left"][i]),
+            y=int(data["top"][i]),
+            w=int(data["width"][i]),
+            h=int(data["height"][i]),
+            conf=conf,
+        ))
+
+    logger.debug(f"Phase2: extracted {len(words)} words")
+    return words
 
 
-def _detect_cells_in_table(table_mask: np.ndarray, offset_x: int, offset_y: int) -> List[TableCell]:
+# ===================================================================
+# PHASE 3 — Coordinate Merging
+# ===================================================================
+
+def _word_center(wb: WordBox) -> Tuple[int, int]:
+    return wb.x + wb.w // 2, wb.y + wb.h // 2
+
+
+def assign_words_to_cells(cells: List[GridCell], words: List[WordBox]) -> None:
     """
-    Detect individual cells within a table region.
-    Uses contour detection on the inverted table grid.
+    Phase 3: For each word, find the grid cell whose bounding box contains
+    the word's center point. Mutates cells in-place.
     """
-    import cv2
-    
-    # Invert to find cell interiors
-    inverted = cv2.bitwise_not(table_mask)
-    
-    # Find cell contours
-    contours, _ = cv2.findContours(inverted, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-    
-    cells = []
-    min_cell_area = 100  # Minimum cell size in pixels
-    
-    cell_bounds = []
-    for contour in contours:
-        x, y, w, h = cv2.boundingRect(contour)
-        area = w * h
-        
-        if area < min_cell_area or w < 10 or h < 10:
-            continue
-            
-        cell_bounds.append((x + offset_x, y + offset_y, w, h))
-    
-    if not cell_bounds:
-        return cells
-    
-    # Sort cells by position to assign row/col indices
-    # Sort by Y first (rows), then by X (columns)
-    cell_bounds.sort(key=lambda b: (b[1], b[0]))
-    
-    # Assign row indices based on Y clustering
-    row_threshold = 15  # pixels
-    current_row = 0
-    last_y = cell_bounds[0][1] if cell_bounds else 0
-    row_map = {}
-    
-    for x, y, w, h in cell_bounds:
-        if abs(y - last_y) > row_threshold:
-            current_row += 1
-        row_map[(x, y, w, h)] = current_row
-        last_y = y
-    
-    # For each row, assign column indices
-    rows_data = {}
-    for bounds, row in row_map.items():
-        if row not in rows_data:
-            rows_data[row] = []
-        rows_data[row].append(bounds)
-    
-    for row, bounds_list in rows_data.items():
-        bounds_list.sort(key=lambda b: b[0])  # Sort by X
-        for col, (x, y, w, h) in enumerate(bounds_list):
-            cells.append(TableCell(
-                x=x, y=y, width=w, height=h,
-                row=row, col=col
-            ))
-    
-    return cells
+    if not cells:
+        return
+
+    for wb in words:
+        cx, cy = _word_center(wb)
+        best_cell: Optional[GridCell] = None
+        best_dist = float("inf")
+
+        for cell in cells:
+            # Check containment
+            if (cell.x <= cx <= cell.x + cell.w) and (cell.y <= cy <= cell.y + cell.h):
+                # If inside, distance is 0 — but prefer tightest fit
+                best_cell = cell
+                best_dist = 0
+                break  # exact match, done
+
+        # Fallback: nearest cell if not inside any (handles slight misalignment)
+        if best_cell is None:
+            for cell in cells:
+                cell_cx = cell.x + cell.w // 2
+                cell_cy = cell.y + cell.h // 2
+                dist = abs(cx - cell_cx) + abs(cy - cell_cy)
+                # Only consider if reasonably close (within 50 % of cell size)
+                max_dist = (cell.w + cell.h) * 0.5
+                if dist < best_dist and dist < max_dist:
+                    best_dist = dist
+                    best_cell = cell
+
+        if best_cell is not None:
+            best_cell.words.append(wb.text)
+
+
+# ===================================================================
+# PHASE 4 — LaTeX Output
+# ===================================================================
+
+def _escape_latex(text: str) -> str:
+    """Escape characters that have special meaning in LaTeX."""
+    replacements = [
+        ("\\", "\\textbackslash{}"),
+        ("&", "\\&"),
+        ("%", "\\%"),
+        ("$", "\\$"),
+        ("#", "\\#"),
+        ("_", "\\_"),
+        ("{", "\\{"),
+        ("}", "\\}"),
+        ("~", "\\textasciitilde{}"),
+        ("^", "\\textasciicircum{}"),
+    ]
+    for old, new in replacements:
+        text = text.replace(old, new)
+    return text
+
+
+def cells_to_latex(cells: List[GridCell], table_index: int = 0) -> str:
+    """
+    Phase 4: Convert grid cells into a LaTeX tabular environment.
+
+    Output format:
+        % TABLE <idx> — <rows> rows × <cols> cols
+        \\begin{tabular}{|l|l|l|...|}
+        \\hline
+        cell & cell & cell \\\\
+        \\hline
+        ...
+        \\end{tabular}
+    """
+    if not cells:
+        return ""
+
+    max_row = max(c.row for c in cells)
+    max_col = max(c.col for c in cells)
+    n_rows = max_row + 1
+    n_cols = max_col + 1
+
+    # Build row-major 2D array
+    grid: List[List[str]] = [["" for _ in range(n_cols)] for _ in range(n_rows)]
+    for cell in cells:
+        grid[cell.row][cell.col] = _escape_latex(cell.text)
+
+    # Build LaTeX
+    col_spec = "|".join(["l"] * n_cols)
+    lines = [
+        f"% TABLE {table_index} — {n_rows} rows x {n_cols} cols",
+        f"\\begin{{tabular}}{{|{col_spec}|}}",
+        "\\hline",
+    ]
+    for row in grid:
+        row_str = " & ".join(row) + " \\\\"
+        lines.append(row_str)
+        lines.append("\\hline")
+    lines.append("\\end{tabular}")
+
+    return "\n".join(lines)
+
+
+# ===================================================================
+# Orchestrator — full page pipeline
+# ===================================================================
+
+def process_page_table(
+    image: Image.Image,
+    table_index: int = 0,
+    tesseract_timeout: float = 6.0,
+) -> Optional[DetectedTable]:
+    """
+    Run the full 4-phase pipeline on a single page image.
+
+    Returns a DetectedTable (with .latex) or None if no grid detected.
+    """
+    t0 = time.monotonic()
+
+    # Phase 1 — grid detection
+    cells, h_pos, v_pos = detect_grid(image)
+    if not cells:
+        return None
+    t1 = time.monotonic()
+    logger.debug(f"Phase1 grid: {len(cells)} cells in {t1 - t0:.2f}s")
+
+    # Phase 2 — word extraction (single Tesseract call on full page)
+    words = extract_word_boxes(image, timeout_s=tesseract_timeout)
+    t2 = time.monotonic()
+    logger.debug(f"Phase2 words: {len(words)} words in {t2 - t1:.2f}s")
+
+    # Phase 3 — coordinate merging
+    assign_words_to_cells(cells, words)
+    t3 = time.monotonic()
+    logger.debug(f"Phase3 merge: {t3 - t2:.2f}s")
+
+    # Phase 4 — LaTeX
+    max_row = max(c.row for c in cells)
+    max_col = max(c.col for c in cells)
+    latex = cells_to_latex(cells, table_index)
+    t4 = time.monotonic()
+
+    logger.info(
+        f"TableOCR page done: {max_row + 1}×{max_col + 1} table, "
+        f"{len(words)} words, {t4 - t0:.2f}s total"
+    )
+
+    # Derive bounding box from line positions
+    return DetectedTable(
+        x=v_pos[0] if v_pos else 0,
+        y=h_pos[0] if h_pos else 0,
+        w=(v_pos[-1] - v_pos[0]) if len(v_pos) >= 2 else 0,
+        h=(h_pos[-1] - h_pos[0]) if len(h_pos) >= 2 else 0,
+        rows=max_row + 1,
+        cols=max_col + 1,
+        cells=cells,
+        latex=latex,
+    )
+
+
+# ===================================================================
+# Public API — drop-in replacements for the rest of the pipeline
+# ===================================================================
+
+def ocr_page_with_table_detection(
+    image: Image.Image,
+    fallback_to_full_ocr: bool = True,
+) -> str:
+    """
+    OCR a single page. If a table grid is detected, returns LaTeX.
+    Otherwise falls back to standard Tesseract full-page OCR.
+    """
+    import pytesseract
+
+    _configure_tesseract()
+    image = _fast_orientation_fix(image)
+
+    table = process_page_table(image)
+    if table and table.latex:
+        return table.latex
+
+    if fallback_to_full_ocr:
+        logger.debug("No table grid detected, using standard OCR")
+        try:
+            text = pytesseract.image_to_string(
+                image, lang="fra+eng", config="--oem 1 --psm 1", timeout=8.0,
+            )
+            return text.strip()
+        except Exception as e:
+            logger.error(f"Fallback OCR failed: {e}")
+            return ""
+
+    return ""
 
 
 def extract_table_with_structure(
     image: Image.Image,
     dpi: int = 200,
-    *,
-    max_cells: int = 250,
-    max_seconds_per_table: float = 4.0,
-    per_cell_timeout_s: float = 0.6,
+    **_kwargs,
 ) -> Dict[str, Any]:
     """
-    Extract table data with full structure preservation.
-    Uses OpenCV for grid detection and Tesseract for cell OCR.
-
-    Performance notes:
-    - Cell-by-cell OCR can explode on dense/dirty tables.
-    - We bound work via max_cells + max_seconds_per_table.
-    - Each Tesseract call has a hard timeout (kills the subprocess).
-
-    Args:
-        image: PIL Image of the page
-        dpi: Resolution (affects cell extraction accuracy)
-        max_cells: Hard cap of OCR'd cells per table (fallback when exceeded)
-        max_seconds_per_table: Hard cap of wall time per table
-        per_cell_timeout_s: Hard timeout per Tesseract call
-
-    Returns:
-        Dict with:
-        - tables: List of table data with cells
-        - text: Pipe-delimited text representation
-        - metadata: Table boundaries and structure info
+    Legacy-compatible wrapper. Returns dict with tables/text/metadata.
     """
-    import pytesseract
-    import time
-
-    _configure_tesseract()
-
-    # Fix orientation
     image = _fast_orientation_fix(image)
+    table = process_page_table(image)
 
-    # Convert to numpy array
-    img_array = np.array(image)
-
-    # Detect table structures
-    tables = detect_table_structure(img_array)
-
-    result_tables = []
-    all_text_lines = []
-
-    for table_idx, table in enumerate(tables):
-        table_start = time.monotonic()
-        truncated = False
-        truncate_reason = ""
-
-        table_data = {
-            "table_index": table_idx,
-            "bounds": {
-                "x": table.x, "y": table.y,
-                "width": table.width, "height": table.height
-            },
-            "rows": table.rows,
-            "cols": table.cols,
-            "cells": [],
-            "truncated": False,
-            "truncate_reason": None,
-        }
-
-        # OCR each cell
-        row_texts: Dict[int, List[Tuple[int, str]]] = {}
-
-        for cell_idx, cell in enumerate(table.cells):
-            # Hard limits to prevent pathological pages from stalling the pipeline
-            if cell_idx >= max_cells:
-                truncated = True
-                truncate_reason = f"max_cells_exceeded({max_cells})"
-                break
-            if (time.monotonic() - table_start) > max_seconds_per_table:
-                truncated = True
-                truncate_reason = f"max_seconds_per_table_exceeded({max_seconds_per_table:.1f}s)"
-                break
-
-            # Extract cell region
-            cell_img = image.crop((
-                max(0, cell.x - 2),
-                max(0, cell.y - 2),
-                min(image.width, cell.x + cell.width + 2),
-                min(image.height, cell.y + cell.height + 2)
-            ))
-
-            # OCR the cell (hard timeout supported by pytesseract)
-            try:
-                cell_text = pytesseract.image_to_string(
-                    cell_img,
-                    lang="fra+eng",
-                    config="--psm 6 --oem 1",
-                    timeout=per_cell_timeout_s,
-                ).strip()
-            except Exception:
-                cell_text = ""
-
-            cell.text = cell_text
-
-            table_data["cells"].append({
-                "row": cell.row,
-                "col": cell.col,
-                "x": cell.x, "y": cell.y,
-                "width": cell.width, "height": cell.height,
-                "text": cell_text,
-            })
-
-            # Group by row for text output
-            row_texts.setdefault(cell.row, []).append((cell.col, cell_text))
-
-        if truncated:
-            table_data["truncated"] = True
-            table_data["truncate_reason"] = truncate_reason
-            logger.warning(f"TableOCR: Truncated table {table_idx} ({truncate_reason})")
-
-        # Build pipe-delimited text for this table
-        for row_idx in sorted(row_texts.keys()):
-            row_cells = sorted(row_texts[row_idx], key=lambda x: x[0])
-            row_text = " | ".join(text for _, text in row_cells)
-            all_text_lines.append(row_text)
-
-        # If we had to truncate heavily, add a marker line to keep downstream context
-        if truncated:
-            all_text_lines.append(f"[TABLE_OCR_TRUNCATED: {truncate_reason}]")
-
-        result_tables.append(table_data)
-        all_text_lines.append("")  # Empty line between tables
+    if not table:
+        return {"tables": [], "text": "", "metadata": {"tables_found": 0}}
 
     return {
-        "tables": result_tables,
-        "text": "\n".join(all_text_lines),
+        "tables": [{
+            "table_index": 0,
+            "bounds": {"x": table.x, "y": table.y, "width": table.w, "height": table.h},
+            "rows": table.rows,
+            "cols": table.cols,
+            "cells": [
+                {"row": c.row, "col": c.col, "x": c.x, "y": c.y,
+                 "width": c.w, "height": c.h, "text": c.text}
+                for c in table.cells
+            ],
+        }],
+        "text": table.latex,
         "metadata": {
-            "tables_found": len(tables),
-            "total_cells": sum(len(t.cells) for t in tables),
-            "max_cells": max_cells,
-            "max_seconds_per_table": max_seconds_per_table,
+            "tables_found": 1,
+            "total_cells": len(table.cells),
+            "output_format": "latex",
         },
     }
-
-
-
-def ocr_page_with_table_detection(
-    image: Image.Image,
-    fallback_to_full_ocr: bool = True
-) -> str:
-    """
-    OCR a single page with intelligent table detection.
-    If tables are found, extracts them with structure.
-    Otherwise, falls back to standard OCR.
-    
-    Args:
-        image: PIL Image of the page
-        fallback_to_full_ocr: If no tables found, do full-page OCR
-    
-    Returns:
-        Extracted text (pipe-delimited for tables)
-    """
-    import pytesseract
-    
-    _configure_tesseract()
-    
-    # Fix orientation first
-    image = _fast_orientation_fix(image)
-    img_array = np.array(image)
-    
-    # Try to detect tables
-    tables = detect_table_structure(img_array)
-    
-    if tables:
-        logger.info(f"TableOCR: Found {len(tables)} table(s), extracting with structure")
-        result = extract_table_with_structure(image)
-        return result["text"]
-    
-    if fallback_to_full_ocr:
-        # No tables found - do standard OCR
-        logger.debug("TableOCR: No tables detected, using standard OCR")
-        text = pytesseract.image_to_string(
-            image,
-            lang="fra+eng",
-            config="--oem 1 --psm 1"
-        )
-        return text.strip()
-    
-    return ""
 
 
 def ocr_pages_with_table_extraction(
     file_bytes: io.BytesIO,
     page_numbers: List[int],
     dpi: int = 200,
-    timeout_per_page: float = 8.0
+    timeout_per_page: float = 10.0,
 ) -> Dict[int, str]:
     """
-    OCR specific pages of a PDF with table structure detection.
-
-    IMPORTANT:
-    - We do NOT use ThreadPoolExecutor timeouts here because Python threads
-      cannot be killed and the executor shutdown would still block.
-    - Instead, we enforce real hard timeouts by passing `timeout=` to
-      pytesseract calls inside extract_table_with_structure().
-
-    Args:
-        file_bytes: PDF content as BytesIO
-        page_numbers: List of page numbers to OCR (1-indexed)
-        dpi: Resolution for conversion
-        timeout_per_page: Best-effort overall budget (used for heuristics/logging)
-
-    Returns:
-        Dict mapping page_number -> extracted_text
+    OCR specific PDF pages with the 4-phase table pipeline.
+    Returns dict mapping page_number → extracted text (LaTeX or plain).
     """
     from pdf2image import convert_from_bytes
-    import time
 
     poppler_path = _get_poppler_path()
     results: Dict[int, str] = {}
@@ -444,11 +518,10 @@ def ocr_pages_with_table_extraction(
         pdf_bytes = file_bytes.read()
 
         for page_num in page_numbers:
-            page_start = time.monotonic()
-            logger.info(f"TableOCR processing page {page_num} at {dpi} DPI...")
+            t0 = time.monotonic()
+            logger.info(f"TableOCR processing page {page_num} at {dpi} DPI…")
 
             try:
-                # Convert page to image
                 images = convert_from_bytes(
                     pdf_bytes,
                     dpi=dpi,
@@ -463,19 +536,19 @@ def ocr_pages_with_table_extraction(
                     results[page_num] = f"[Page {page_num} conversion failed]"
                     continue
 
-                image = images[0]
+                text = ocr_page_with_table_detection(images[0])
+                elapsed = time.monotonic() - t0
 
-                # Run OCR (bounded + hard per-cell timeouts)
-                text = ocr_page_with_table_detection(image)
-
-                elapsed = time.monotonic() - page_start
                 if elapsed > timeout_per_page:
                     logger.warning(
-                        f"TableOCR page {page_num} exceeded budget: {elapsed:.1f}s > {timeout_per_page:.1f}s"
+                        f"TableOCR page {page_num} slow: {elapsed:.1f}s "
+                        f"(budget {timeout_per_page:.1f}s)"
                     )
 
                 if text:
-                    logger.info(f"TableOCR page {page_num}: extracted {len(text)} chars")
+                    logger.info(
+                        f"TableOCR page {page_num}: {len(text)} chars in {elapsed:.1f}s"
+                    )
                     results[page_num] = text
                 else:
                     results[page_num] = f"[Page {page_num}: No text detected]"
@@ -491,20 +564,12 @@ def ocr_pages_with_table_extraction(
         return {p: f"[OCR FAILED: {str(e)}]" for p in page_numbers}
 
 
+# ===================================================================
+# Bordereau page detection + re-OCR (unchanged interface)
+# ===================================================================
 
 def detect_bordereau_pages(full_text: str) -> List[int]:
-    """
-    Detect which pages likely contain Bordereau des Prix tables.
-    Same logic as the original paddle_ocr module.
-    
-    Args:
-        full_text: Full OCR text with page markers (--- Page X ---)
-    
-    Returns:
-        List of page numbers containing bordereau indicators
-    """
-    import re
-    
+    """Detect which pages likely contain Bordereau des Prix tables."""
     bordereau_indicators = [
         r"bordereau\s+des\s+prix",
         r"bordereau\s+prix",
@@ -519,82 +584,63 @@ def detect_bordereau_pages(full_text: str) -> List[int]:
         r"quantit[ée]",
         r"unit[ée]",
     ]
-    
     pattern = "|".join(bordereau_indicators)
-    
-    # Split by page markers
     pages = re.split(r'---\s*Page\s+(\d+)\s*---', full_text)
-    
-    detected_pages = []
-    
+    detected: List[int] = []
+
     for i in range(1, len(pages), 2):
         if i + 1 < len(pages):
             page_num = int(pages[i])
-            page_content = pages[i + 1].lower()
-            
-            matches = len(re.findall(pattern, page_content, re.IGNORECASE))
-            has_table_structure = page_content.count('|') > 5 or bool(re.search(r'\d+\s+\d+', page_content))
-            
-            if matches >= 2 or (matches >= 1 and has_table_structure):
-                detected_pages.append(page_num)
-                logger.debug(f"Bordereau indicators found on page {page_num}: {matches} matches")
-    
-    return detected_pages
+            content = pages[i + 1].lower()
+            matches = len(re.findall(pattern, content, re.IGNORECASE))
+            has_table = content.count('|') > 5 or bool(re.search(r'\d+\s+\d+', content))
+            if matches >= 2 or (matches >= 1 and has_table):
+                detected.append(page_num)
+
+    return detected
 
 
 def reocr_bordereau_pages(
     file_bytes: io.BytesIO,
     original_text: str,
-    force_pages: Optional[List[int]] = None
+    force_pages: Optional[List[int]] = None,
 ) -> str:
     """
-    Re-OCR bordereau pages with table extraction and merge back into original text.
-    Drop-in replacement for paddle_ocr.reocr_bordereau_pages.
-    
-    Args:
-        file_bytes: Original PDF bytes
-        original_text: Full text from initial Tesseract OCR
-        force_pages: Optional list of specific pages to re-OCR
-    
-    Returns:
-        Updated text with bordereau pages re-OCR'd using table extraction
+    Re-OCR bordereau pages with the coordinate-based table pipeline
+    and merge LaTeX output back into the original text.
     """
-    import re
-    
-    # Detect bordereau pages if not specified
     if force_pages:
         bordereau_pages = force_pages
     else:
         bordereau_pages = detect_bordereau_pages(original_text)
-    
+
     if not bordereau_pages:
         logger.info("No bordereau pages detected, keeping original OCR")
         return original_text
-    
-    logger.info(f"🔄 Re-OCRing {len(bordereau_pages)} bordereau pages with TableOCR: {bordereau_pages}")
-    
-    # OCR the bordereau pages with table extraction
+
+    logger.info(
+        f"🔄 Re-OCRing {len(bordereau_pages)} bordereau pages "
+        f"with coordinate pipeline: {bordereau_pages}"
+    )
+
     table_results = ocr_pages_with_table_extraction(file_bytes, bordereau_pages)
-    
-    # Replace those pages in the original text
+
     result_text = original_text
-    
     for page_num, table_text in table_results.items():
         if "[OCR" in table_text or "[Page" in table_text:
-            logger.warning(f"TableOCR failed for page {page_num}, keeping Tesseract result")
+            logger.warning(
+                f"TableOCR failed for page {page_num}, keeping Tesseract result"
+            )
             continue
-        
-        # Find and replace the page content
+
         pattern = rf'(---\s*Page\s+{page_num}\s*---\n)(.*?)(?=---\s*Page\s+\d+\s*---|$)'
-        
-        def replace_page(match):
-            marker = match.group(1)
-            return f"{marker}{table_text}\n\n"
-        
+
+        def replace_page(match, _txt=table_text):
+            return f"{match.group(1)}{_txt}\n\n"
+
         new_text = re.sub(pattern, replace_page, result_text, flags=re.DOTALL)
-        
         if new_text != result_text:
-            logger.info(f"✅ Page {page_num} re-OCR'd with TableOCR: {len(table_text)} chars")
+            logger.info(f"✅ Page {page_num} re-OCR'd with LaTeX table: {len(table_text)} chars")
             result_text = new_text
-    
+
     return result_text
