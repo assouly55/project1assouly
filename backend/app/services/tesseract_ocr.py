@@ -202,8 +202,8 @@ def _ocr_single_page_adaptive(args: Tuple[int, bytes, int, int, float, bool]) ->
 
         text = pytesseract.image_to_string(
             img,
-            lang="fra+ara+eng",
-            config=f"--oem 1 --psm {psm} -c preserve_interword_spaces=1",
+            lang="fra",
+            config=f"--oem 1 --psm {psm}",
             timeout=timeout_s,
         )
         if text.strip():
@@ -227,7 +227,7 @@ def _ocr_fallback_ultra(page_num: int, img_bytes: bytes) -> Tuple[int, str]:
         img = img.resize((img.width // 4, img.height // 4), Image.LANCZOS)
 
         text = pytesseract.image_to_string(
-            img, lang="fra+eng",
+            img, lang="fra",
             config="--oem 1 --psm 3",
             timeout=3.0,
         )
@@ -258,21 +258,19 @@ def ocr_first_page_tesseract(file_bytes: io.BytesIO) -> str:
         pdf_bytes = file_bytes.read()
 
         images = convert_from_bytes(
-            pdf_bytes, dpi=150,
+            pdf_bytes, dpi=72,
             first_page=1, last_page=1,
-            poppler_path=poppler_path, fmt="png",
+            poppler_path=poppler_path, fmt="jpeg",
         )
         if not images:
             return ""
 
-        from PIL import ImageEnhance
         img = images[0].convert("L")
-        img = ImageEnhance.Contrast(img).enhance(1.3)
 
         text = pytesseract.image_to_string(
-            img, lang="fra+ara+eng",
-            config="--oem 1 --psm 1 -c preserve_interword_spaces=1",
-            timeout=8.0,
+            img, lang="fra",
+            config="--oem 1 --psm 3",
+            timeout=5.0,
         )
         logger.info(f"First page OCR: {len(text)} chars")
         return text.strip()
