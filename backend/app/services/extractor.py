@@ -504,8 +504,10 @@ def _extract_full_doc(file_bytes: io.BytesIO) -> Tuple[str, int]:
 
 
 def _get_first_page_xlsx(file_bytes: io.BytesIO) -> str:
-    """Get first rows from first sheet of XLSX"""
+    """Get first rows from first sheet of XLSX/XLS"""
     file_bytes.seek(0)
+    
+    # Try openpyxl first (works for .xlsx)
     try:
         wb = openpyxl.load_workbook(file_bytes, read_only=True, data_only=True)
         if not wb.sheetnames:
@@ -521,13 +523,23 @@ def _get_first_page_xlsx(file_bytes: io.BytesIO) -> str:
             if any(row_values):
                 text_parts.append(" | ".join(row_values))
                 row_count += 1
-                if row_count > 20:  # First 20 rows
+                if row_count > 20:
                     break
         
         wb.close()
         return "\n".join(text_parts)
     except Exception as e:
-        logger.error(f"XLSX first-page extraction failed: {e}")
+        logger.debug(f"openpyxl failed (likely .xls): {e}")
+    
+    # Fallback: pandas (handles .xls via xlrd and .xlsx)
+    file_bytes.seek(0)
+    try:
+        df = pd.read_excel(file_bytes, sheet_name=0, nrows=20)
+        if df.empty:
+            return ""
+        return df.to_string(index=False)
+    except Exception as e:
+        logger.error(f"Excel first-page extraction failed: {e}")
         return ""
 
 
