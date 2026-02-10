@@ -408,9 +408,11 @@ class AIService:
         AI will find the Bordereau section and extract items with units and quantities.
         
         Includes smart pre-check to skip documents that don't contain a Bordereau.
+        Files already classified as BPDE always go through (they ARE the bordereau).
         """
-        # Smart pre-check: Skip documents without Bordereau indicators
-        if not self._has_bordereau_indicators(content):
+        # Always process files classified as BPDE (bordereau) — skip indicator check
+        is_bpde = source_type.upper() in ("BPDE", "BORDEREAU")
+        if not is_bpde and not self._has_bordereau_indicators(content):
             logger.info(f"   ⏭ Skipping {source_name}: No Bordereau indicators found")
             return None
         

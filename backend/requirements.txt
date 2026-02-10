@@ -23,6 +23,7 @@ pypdf>=4.0.1
 python-docx>=1.1.0
 openpyxl>=3.1.2
 pandas>=2.2.3
+xlrd>=2.0.1  # Legacy .xls file support for pandas
 pymupdf>=1.25.0  # Pre-built wheels for Python 3.13
 
 # OCR - Tesseract + OpenCV for table extraction
