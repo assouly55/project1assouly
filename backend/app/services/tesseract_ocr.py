@@ -145,7 +145,7 @@ def build_page_profiles(pdf_bytes: bytes) -> List[PageProfile]:
         if page_type == PageType.SIMPLE_TEXT:
             profile = PageProfile(i + 1, page_type, dpi=72, psm=3, timeout_s=5.0, use_table_ocr=False)
         elif page_type == PageType.MEDIUM_TABLE:
-            profile = PageProfile(i + 1, page_type, dpi=100, psm=6, timeout_s=5.0, use_table_ocr=False)
+            profile = PageProfile(i + 1, page_type, dpi=100, psm=6, timeout_s=6.0, use_table_ocr=True)
         elif page_type == PageType.COMPLEX_TABLE:
             profile = PageProfile(i + 1, page_type, dpi=150, psm=6, timeout_s=8.0, use_table_ocr=True)
         else:  # IMAGE_HEAVY
