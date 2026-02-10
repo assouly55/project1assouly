@@ -680,19 +680,26 @@ def _extract_full_pdf_digital(file_bytes: io.BytesIO) -> Tuple[str, int]:
 
 def _extract_full_pdf_ocr(file_bytes: io.BytesIO) -> Tuple[str, int]:
     """
-    Full OCR extraction from scanned PDF.
-    Uses Tesseract for initial OCR, then OpenCV+Tesseract table extraction for bordereau pages.
+    Full OCR extraction from scanned PDF — two-step pipeline:
+    
+    Step 1: Fast plain-text OCR of all pages (no table detection).
+            This text is kept for indexing and general use.
+    Step 2: Detect bordereau pages from the OCR text, then re-OCR 
+            only those pages with the coordinate-based table pipeline
+            (OpenCV grid + Tesseract word boxes → LaTeX).
+            The LaTeX output replaces the plain text for those pages,
+            giving the AI structured column data for item extraction.
     """
     try:
         from app.services.tesseract_ocr import ocr_full_pdf_tesseract_parallel
         
-        # Step 1: Initial OCR with Tesseract (fast, parallel)
+        # Step 1: Fast plain-text OCR (no table detection)
         text, page_count = ocr_full_pdf_tesseract_parallel(file_bytes)
         
         if not text or "[OCR FAILED" in text:
             return text, page_count
         
-        # Step 2: Detect and re-OCR bordereau pages with table extraction
+        # Step 2: Detect bordereau pages from OCR text → re-OCR with table pipeline → LaTeX
         try:
             from app.services.table_ocr import reocr_bordereau_pages
             
@@ -700,7 +707,7 @@ def _extract_full_pdf_ocr(file_bytes: io.BytesIO) -> Tuple[str, int]:
             enhanced_text = reocr_bordereau_pages(file_bytes, text)
             
             if enhanced_text != text:
-                logger.info("✅ Bordereau pages enhanced with TableOCR")
+                logger.info("✅ Bordereau pages enhanced with coordinate-based LaTeX table OCR")
             
             return enhanced_text, page_count
             

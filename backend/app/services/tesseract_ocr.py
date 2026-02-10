@@ -66,7 +66,6 @@ class PageProfile:
     dpi: int
     psm: int
     timeout_s: float
-    use_table_ocr: bool
 
 
 def _classify_page_complexity(img_bytes: bytes) -> PageType:
@@ -131,7 +130,7 @@ def build_page_profiles(pdf_bytes: bytes) -> List[PageProfile]:
     except Exception as e:
         logger.error(f"Pre-scan failed: {e}")
         return [
-            PageProfile(p, PageType.SIMPLE_TEXT, 72, 3, 5.0, False)
+            PageProfile(p, PageType.SIMPLE_TEXT, 72, 3, 5.0)
             for p in range(1, total_pages + 1)
         ]
 
@@ -141,15 +140,15 @@ def build_page_profiles(pdf_bytes: bytes) -> List[PageProfile]:
         thumb.save(buf, format="JPEG", quality=50)
         page_type = _classify_page_complexity(buf.getvalue())
 
-        # LOW DPI defaults to prevent timeouts
+        # LOW DPI defaults — pure text OCR only (no table detection here)
         if page_type == PageType.SIMPLE_TEXT:
-            profile = PageProfile(i + 1, page_type, dpi=72, psm=3, timeout_s=5.0, use_table_ocr=False)
+            profile = PageProfile(i + 1, page_type, dpi=72, psm=3, timeout_s=5.0)
         elif page_type == PageType.MEDIUM_TABLE:
-            profile = PageProfile(i + 1, page_type, dpi=100, psm=6, timeout_s=6.0, use_table_ocr=True)
+            profile = PageProfile(i + 1, page_type, dpi=100, psm=6, timeout_s=6.0)
         elif page_type == PageType.COMPLEX_TABLE:
-            profile = PageProfile(i + 1, page_type, dpi=150, psm=6, timeout_s=8.0, use_table_ocr=True)
+            profile = PageProfile(i + 1, page_type, dpi=150, psm=6, timeout_s=8.0)
         else:  # IMAGE_HEAVY
-            profile = PageProfile(i + 1, page_type, dpi=72, psm=1, timeout_s=4.0, use_table_ocr=False)
+            profile = PageProfile(i + 1, page_type, dpi=72, psm=1, timeout_s=4.0)
 
         profiles.append(profile)
 
@@ -166,15 +165,17 @@ def build_page_profiles(pdf_bytes: bytes) -> List[PageProfile]:
 # Single-page OCR — 2 attempts max, then give up
 # ---------------------------------------------------------------------------
 
-def _ocr_single_page_adaptive(args: Tuple[int, bytes, int, int, float, bool]) -> Tuple[int, str]:
+def _ocr_single_page_adaptive(args: Tuple[int, bytes, int, int, float]) -> Tuple[int, str]:
     """
-    OCR one page. Level 1 at configured settings, Level 2 ultra-fast fallback.
+    OCR one page with pure text extraction (no table detection).
+    Table detection happens later via reocr_bordereau_pages.
+    Level 1 at configured settings, Level 2 ultra-fast fallback.
     Never more than 2 attempts. Never hangs.
     """
     import pytesseract
     from PIL import Image, ImageEnhance
 
-    page_num, img_bytes, _dpi, psm, timeout_s, use_table_ocr = args
+    page_num, img_bytes, _dpi, psm, timeout_s = args
     _configure_tesseract()
 
     try:
@@ -185,17 +186,7 @@ def _ocr_single_page_adaptive(args: Tuple[int, bytes, int, int, float, bool]) ->
         if w > h * 1.2:
             img = img.rotate(-90, expand=True)
 
-        # Table OCR if flagged (tight timeout)
-        if use_table_ocr:
-            try:
-                from app.services.table_ocr import process_page_table
-                table = process_page_table(img, tesseract_timeout=min(timeout_s - 1.0, 4.0))
-                if table and table.latex and len(table.latex) > 50:
-                    return (page_num, table.latex)
-            except Exception as e:
-                logger.debug(f"Page {page_num} table OCR skipped: {e}")
-
-        # Level 1: standard OCR
+        # Pure text OCR (no table detection — that happens in a separate pass)
         if img.mode != "L":
             img = img.convert("L")
         img = ImageEnhance.Contrast(img).enhance(1.3)
@@ -326,7 +317,6 @@ def ocr_full_pdf_tesseract_parallel(
             for p in profiles:
                 p.dpi = 72
                 p.timeout_s = 4.0
-                p.use_table_ocr = False
 
         logger.info(f"OCR starting: {total_pages} pages, {max_workers} workers")
         t0 = time.monotonic()
@@ -359,7 +349,7 @@ def ocr_full_pdf_tesseract_parallel(
                             page_args.append((
                                 profile.page_num, buf.getvalue(),
                                 group_dpi, profile.psm,
-                                profile.timeout_s, profile.use_table_ocr,
+                                profile.timeout_s,
                             ))
                     except Exception as e:
                         logger.error(f"Page {profile.page_num} conversion failed: {e}")
