@@ -453,7 +453,7 @@ def ocr_page_with_table_detection(
         logger.debug("No table grid detected, using standard OCR")
         try:
             text = pytesseract.image_to_string(
-                image, lang="fra+eng", config="--oem 1 --psm 1", timeout=8.0,
+                image, lang="fra", config="--oem 1 --psm 3", timeout=5.0,
             )
             return text.strip()
         except Exception as e:
@@ -617,6 +617,15 @@ def reocr_bordereau_pages(
     if not bordereau_pages:
         logger.info("No bordereau pages detected, keeping original OCR")
         return original_text
+
+    # Limit to max 15 pages to prevent excessive processing time
+    MAX_BORDEREAU_PAGES = 15
+    if len(bordereau_pages) > MAX_BORDEREAU_PAGES:
+        logger.warning(
+            f"Too many bordereau pages ({len(bordereau_pages)}), "
+            f"limiting to first {MAX_BORDEREAU_PAGES}"
+        )
+        bordereau_pages = bordereau_pages[:MAX_BORDEREAU_PAGES]
 
     logger.info(
         f"🔄 Re-OCRing {len(bordereau_pages)} bordereau pages "

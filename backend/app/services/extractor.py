@@ -16,10 +16,15 @@ from enum import Enum
 from loguru import logger
 
 # Document processing
+import warnings
 import pypdf
 from docx import Document as DocxDocument
 import openpyxl
 import pandas as pd
+
+# Suppress noisy PDF warnings for malformed files
+warnings.filterwarnings("ignore", message=".*Multiple definitions in dictionary.*")
+warnings.filterwarnings("ignore", message=".*Overwriting.*")
 
 
 class DocumentType(str, Enum):
