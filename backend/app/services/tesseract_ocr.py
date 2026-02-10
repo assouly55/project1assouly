@@ -1,14 +1,14 @@
 """
-Tender AI Platform - Adaptive Tesseract OCR
-============================================
-Smart OCR pipeline with:
-  - Pre-scan at 72 DPI to classify page complexity
-  - Adaptive DPI/config per page type (text vs table vs image)
-  - Hard per-page timeouts (no hangs)
-  - Progressive fallback chain
-  - Single-pass processing (no redundant OCR)
+Tender AI Platform - Timeout-Proof Tesseract OCR
+=================================================
+Aggressive anti-timeout pipeline:
+  - Max 2 workers (prevents resource contention)
+  - Low DPI first (72-150), only escalate if needed
+  - Hard 5s timeout per page, 3s for fallback
+  - 2 attempts max per page, then mark as image-only
+  - No infinite retries, no hangs
 
-Performance target: ≤15s for 20 pages.
+Performance target: ≤15s for 20 pages, 0% timeout rate.
 """
 
 import io
@@ -32,8 +32,8 @@ POPPLER_PATH_WIN = r"C:\poppler-24.08.0\Library\bin"
 # ---------------------------------------------------------------------------
 
 def _get_optimal_workers() -> int:
-    cpu_count = os.cpu_count() or 4
-    return max(2, cpu_count - 2)
+    """Max 2 workers to prevent resource contention causing timeouts."""
+    return 2
 
 
 def _configure_tesseract():
@@ -53,28 +53,24 @@ def _get_poppler_path() -> Optional[str]:
 # ---------------------------------------------------------------------------
 
 class PageType(str, Enum):
-    SIMPLE_TEXT = "simple"    # Mostly text, no tables
-    MEDIUM_TABLE = "medium"   # Some table structure
-    COMPLEX_TABLE = "complex" # Dense/complex tables
-    IMAGE_HEAVY = "image"     # Photos/diagrams, sparse text
+    SIMPLE_TEXT = "simple"
+    MEDIUM_TABLE = "medium"
+    COMPLEX_TABLE = "complex"
+    IMAGE_HEAVY = "image"
 
 
 @dataclass
 class PageProfile:
-    """Complexity profile for a single page."""
     page_num: int
     page_type: PageType
     dpi: int
-    psm: int          # Tesseract page segmentation mode
+    psm: int
     timeout_s: float
     use_table_ocr: bool
 
 
 def _classify_page_complexity(img_bytes: bytes) -> PageType:
-    """
-    Quick classification of page complexity from a low-res thumbnail.
-    Uses simple heuristics: edge density, text density, line detection.
-    """
+    """Quick classification from a low-res thumbnail."""
     try:
         import cv2
         import numpy as np
@@ -83,19 +79,16 @@ def _classify_page_complexity(img_bytes: bytes) -> PageType:
         img = Image.open(io.BytesIO(img_bytes)).convert("L")
         arr = np.array(img)
 
-        # Edge detection for line/structure density
         edges = cv2.Canny(arr, 50, 150)
-        edge_ratio = np.count_nonzero(edges) / edges.size
+        edge_ratio = edges.astype(bool).sum() / edges.size
 
-        # Binary for text density
         _, binary = cv2.threshold(arr, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-        text_ratio = np.count_nonzero(binary) / binary.size
+        text_ratio = binary.astype(bool).sum() / binary.size
 
-        # Horizontal line detection (table indicator)
         h, w = binary.shape
         h_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (max(w // 8, 20), 1))
         h_lines = cv2.morphologyEx(binary, cv2.MORPH_OPEN, h_kernel)
-        h_line_ratio = np.count_nonzero(h_lines) / h_lines.size
+        h_line_ratio = h_lines.astype(bool).sum() / h_lines.size
 
         if h_line_ratio > 0.005 and edge_ratio > 0.08:
             return PageType.COMPLEX_TABLE
@@ -108,14 +101,11 @@ def _classify_page_complexity(img_bytes: bytes) -> PageType:
 
     except Exception as e:
         logger.debug(f"Page classification failed: {e}")
-        return PageType.MEDIUM_TABLE  # safe default
+        return PageType.SIMPLE_TEXT  # default to lightest processing
 
 
 def build_page_profiles(pdf_bytes: bytes) -> List[PageProfile]:
-    """
-    Pre-scan all pages at 72 DPI and build a processing profile for each.
-    Target: ~3 seconds for entire pre-scan.
-    """
+    """Pre-scan all pages at 72 DPI and build processing profiles."""
     from pdf2image import convert_from_bytes, pdfinfo_from_bytes
 
     poppler_path = _get_poppler_path()
@@ -124,7 +114,7 @@ def build_page_profiles(pdf_bytes: bytes) -> List[PageProfile]:
         info = pdfinfo_from_bytes(pdf_bytes, poppler_path=poppler_path)
         total_pages = info.get("Pages", 0)
     except Exception:
-        total_pages = 50  # cap
+        total_pages = 50
 
     if total_pages == 0:
         return []
@@ -132,22 +122,16 @@ def build_page_profiles(pdf_bytes: bytes) -> List[PageProfile]:
     logger.info(f"Pre-scanning {total_pages} pages at 72 DPI...")
     t0 = time.monotonic()
 
-    # Convert all pages at low DPI for fast analysis
     try:
         thumbs = convert_from_bytes(
-            pdf_bytes,
-            dpi=72,
-            first_page=1,
-            last_page=total_pages,
-            poppler_path=poppler_path,
-            fmt="jpeg",
-            thread_count=2,
+            pdf_bytes, dpi=72,
+            first_page=1, last_page=total_pages,
+            poppler_path=poppler_path, fmt="jpeg", thread_count=2,
         )
     except Exception as e:
         logger.error(f"Pre-scan failed: {e}")
-        # Return default profiles
         return [
-            PageProfile(p, PageType.MEDIUM_TABLE, 150, 3, 8.0, False)
+            PageProfile(p, PageType.SIMPLE_TEXT, 72, 3, 5.0, False)
             for p in range(1, total_pages + 1)
         ]
 
@@ -157,20 +141,20 @@ def build_page_profiles(pdf_bytes: bytes) -> List[PageProfile]:
         thumb.save(buf, format="JPEG", quality=50)
         page_type = _classify_page_complexity(buf.getvalue())
 
-        # Adaptive configuration per page type
+        # LOW DPI defaults to prevent timeouts
         if page_type == PageType.SIMPLE_TEXT:
-            profile = PageProfile(i + 1, page_type, dpi=150, psm=3, timeout_s=6.0, use_table_ocr=False)
+            profile = PageProfile(i + 1, page_type, dpi=72, psm=3, timeout_s=5.0, use_table_ocr=False)
         elif page_type == PageType.MEDIUM_TABLE:
-            profile = PageProfile(i + 1, page_type, dpi=200, psm=6, timeout_s=8.0, use_table_ocr=True)
+            profile = PageProfile(i + 1, page_type, dpi=100, psm=6, timeout_s=5.0, use_table_ocr=False)
         elif page_type == PageType.COMPLEX_TABLE:
-            profile = PageProfile(i + 1, page_type, dpi=250, psm=6, timeout_s=10.0, use_table_ocr=True)
+            profile = PageProfile(i + 1, page_type, dpi=150, psm=6, timeout_s=8.0, use_table_ocr=True)
         else:  # IMAGE_HEAVY
-            profile = PageProfile(i + 1, page_type, dpi=150, psm=1, timeout_s=5.0, use_table_ocr=False)
+            profile = PageProfile(i + 1, page_type, dpi=72, psm=1, timeout_s=4.0, use_table_ocr=False)
 
         profiles.append(profile)
 
     elapsed = time.monotonic() - t0
-    type_counts = {}
+    type_counts: Dict[str, int] = {}
     for p in profiles:
         type_counts[p.page_type.value] = type_counts.get(p.page_type.value, 0) + 1
 
@@ -179,16 +163,16 @@ def build_page_profiles(pdf_bytes: bytes) -> List[PageProfile]:
 
 
 # ---------------------------------------------------------------------------
-# Single-page OCR with hard timeout
+# Single-page OCR — 2 attempts max, then give up
 # ---------------------------------------------------------------------------
 
 def _ocr_single_page_adaptive(args: Tuple[int, bytes, int, int, float, bool]) -> Tuple[int, str]:
     """
-    OCR a single page with adaptive config and hard timeout.
-    args: (page_num, img_bytes, dpi_for_convert, psm, timeout_s, use_table_ocr)
+    OCR one page. Level 1 at configured settings, Level 2 ultra-fast fallback.
+    Never more than 2 attempts. Never hangs.
     """
     import pytesseract
-    from PIL import Image, ImageEnhance, ImageFilter
+    from PIL import Image, ImageEnhance
 
     page_num, img_bytes, _dpi, psm, timeout_s, use_table_ocr = args
     _configure_tesseract()
@@ -201,21 +185,20 @@ def _ocr_single_page_adaptive(args: Tuple[int, bytes, int, int, float, bool]) ->
         if w > h * 1.2:
             img = img.rotate(-90, expand=True)
 
-        # Try table OCR first if flagged
+        # Table OCR if flagged (tight timeout)
         if use_table_ocr:
             try:
                 from app.services.table_ocr import process_page_table
-                table = process_page_table(img, tesseract_timeout=timeout_s - 1.0)
+                table = process_page_table(img, tesseract_timeout=min(timeout_s - 1.0, 4.0))
                 if table and table.latex and len(table.latex) > 50:
                     return (page_num, table.latex)
             except Exception as e:
-                logger.debug(f"Page {page_num} table OCR failed, falling back: {e}")
+                logger.debug(f"Page {page_num} table OCR skipped: {e}")
 
-        # Standard OCR with optimized image
+        # Level 1: standard OCR
         if img.mode != "L":
             img = img.convert("L")
-        img = ImageEnhance.Contrast(img).enhance(1.5)
-        img = img.filter(ImageFilter.SHARPEN)
+        img = ImageEnhance.Contrast(img).enhance(1.3)
 
         text = pytesseract.image_to_string(
             img,
@@ -223,42 +206,43 @@ def _ocr_single_page_adaptive(args: Tuple[int, bytes, int, int, float, bool]) ->
             config=f"--oem 1 --psm {psm} -c preserve_interword_spaces=1",
             timeout=timeout_s,
         )
-        return (page_num, text.strip())
+        if text.strip():
+            return (page_num, text.strip())
 
     except Exception as e:
-        logger.warning(f"Page {page_num} OCR failed: {e}")
-        # Fallback attempt: lowest settings
-        return _ocr_fallback(page_num, img_bytes)
+        logger.warning(f"Page {page_num} L1 failed: {e}")
+
+    # Level 2: ultra-fast fallback
+    return _ocr_fallback_ultra(page_num, img_bytes)
 
 
-def _ocr_fallback(page_num: int, img_bytes: bytes) -> Tuple[int, str]:
-    """Last-resort OCR: grayscale, low config, short timeout."""
+def _ocr_fallback_ultra(page_num: int, img_bytes: bytes) -> Tuple[int, str]:
+    """Ultra-fast last resort: 25% size, 3s timeout, then give up."""
     import pytesseract
     from PIL import Image
 
     _configure_tesseract()
     try:
         img = Image.open(io.BytesIO(img_bytes)).convert("L")
-        # Resize down 50% to reduce work
-        img = img.resize((img.width // 2, img.height // 2), Image.LANCZOS)
+        img = img.resize((img.width // 4, img.height // 4), Image.LANCZOS)
 
         text = pytesseract.image_to_string(
-            img,
-            lang="fra+eng",
+            img, lang="fra+eng",
             config="--oem 1 --psm 3",
-            timeout=5.0,
+            timeout=3.0,
         )
         if text.strip():
-            logger.info(f"Page {page_num} recovered via fallback OCR")
+            logger.info(f"Page {page_num} recovered via ultra-fast fallback")
             return (page_num, text.strip())
     except Exception:
         pass
 
-    return (page_num, f"[Page {page_num}: OCR failed after all attempts]")
+    logger.warning(f"Page {page_num} unrecoverable — image-only")
+    return (page_num, f"[Page {page_num}: image-only, OCR unavailable]")
 
 
 # ---------------------------------------------------------------------------
-# First-page OCR (for classification — unchanged interface)
+# First-page OCR (for classification)
 # ---------------------------------------------------------------------------
 
 def ocr_first_page_tesseract(file_bytes: io.BytesIO) -> str:
@@ -274,22 +258,21 @@ def ocr_first_page_tesseract(file_bytes: io.BytesIO) -> str:
         pdf_bytes = file_bytes.read()
 
         images = convert_from_bytes(
-            pdf_bytes, dpi=250,
+            pdf_bytes, dpi=150,
             first_page=1, last_page=1,
             poppler_path=poppler_path, fmt="png",
         )
         if not images:
             return ""
 
-        from PIL import ImageEnhance, ImageFilter
+        from PIL import ImageEnhance
         img = images[0].convert("L")
-        img = ImageEnhance.Contrast(img).enhance(1.5)
-        img = img.filter(ImageFilter.SHARPEN)
+        img = ImageEnhance.Contrast(img).enhance(1.3)
 
         text = pytesseract.image_to_string(
             img, lang="fra+ara+eng",
             config="--oem 1 --psm 1 -c preserve_interword_spaces=1",
-            timeout=10.0,
+            timeout=8.0,
         )
         logger.info(f"First page OCR: {len(text)} chars")
         return text.strip()
@@ -300,22 +283,22 @@ def ocr_first_page_tesseract(file_bytes: io.BytesIO) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Full PDF OCR — adaptive parallel pipeline
+# Full PDF OCR — timeout-proof parallel pipeline
 # ---------------------------------------------------------------------------
 
 def ocr_full_pdf_tesseract_parallel(
     file_bytes: io.BytesIO,
     max_workers: Optional[int] = None,
-    dpi: int = 200,
+    dpi: int = 100,
     batch_size: int = 5,
 ) -> Tuple[str, int]:
     """
-    Adaptive OCR pipeline:
-    1. Pre-scan at 72 DPI → classify every page
-    2. Convert pages in batches at per-page DPI
-    3. OCR in parallel with per-page config + hard timeouts
-    4. Table pages get coordinate-based LaTeX extraction
-    5. Progressive fallback on any failure
+    Timeout-proof OCR pipeline:
+    1. Pre-scan at 72 DPI → classify pages
+    2. Convert at LOW DPI (72-150) per page type
+    3. OCR with max 2 workers, hard 5s timeouts
+    4. 2 attempts max per page, then mark image-only
+    5. Always completes, never hangs
 
     Returns: (full_text, page_count)
     """
@@ -338,59 +321,47 @@ def ocr_full_pdf_tesseract_parallel(
 
         total_pages = len(profiles)
 
-        # Estimate total time — if too high, downgrade all to medium
-        estimated_time = sum(p.timeout_s * 0.5 for p in profiles)  # ~50% of budget
-        if estimated_time > 30.0:
-            logger.warning(f"Estimated {estimated_time:.0f}s — downgrading to fast mode")
+        # Force ultra-fast if many pages
+        estimated_time = sum(p.timeout_s * 0.5 for p in profiles)
+        if estimated_time > 20.0:
+            logger.warning(f"Estimated {estimated_time:.0f}s — forcing ultra-fast mode")
             for p in profiles:
-                p.dpi = min(p.dpi, 150)
-                p.timeout_s = min(p.timeout_s, 6.0)
-                p.use_table_ocr = p.page_type == PageType.COMPLEX_TABLE  # only complex
+                p.dpi = 72
+                p.timeout_s = 4.0
+                p.use_table_ocr = False
 
         logger.info(f"OCR starting: {total_pages} pages, {max_workers} workers")
         t0 = time.monotonic()
 
         all_results: Dict[int, str] = {}
 
-        # Process in DPI-grouped batches for efficiency
-        # Group pages by DPI to minimize re-conversions
+        # Group by DPI for batch conversion
         dpi_groups: Dict[int, List[PageProfile]] = {}
         for p in profiles:
             dpi_groups.setdefault(p.dpi, []).append(p)
 
         for group_dpi, group_profiles in dpi_groups.items():
-            # Convert pages in this DPI group
             for batch_start in range(0, len(group_profiles), batch_size):
                 batch = group_profiles[batch_start:batch_start + batch_size]
                 page_nums = [p.page_num for p in batch]
 
-                logger.info(
-                    f"Converting pages {page_nums} at {group_dpi} DPI..."
-                )
+                logger.info(f"Converting pages {page_nums} at {group_dpi} DPI...")
 
-                # Convert batch
                 page_args = []
                 for profile in batch:
                     try:
                         images = convert_from_bytes(
-                            pdf_bytes,
-                            dpi=group_dpi,
-                            first_page=profile.page_num,
-                            last_page=profile.page_num,
-                            poppler_path=poppler_path,
-                            fmt="jpeg",
-                            thread_count=1,
+                            pdf_bytes, dpi=group_dpi,
+                            first_page=profile.page_num, last_page=profile.page_num,
+                            poppler_path=poppler_path, fmt="jpeg", thread_count=1,
                         )
                         if images:
                             buf = io.BytesIO()
                             images[0].save(buf, format="PNG", optimize=True)
                             page_args.append((
-                                profile.page_num,
-                                buf.getvalue(),
-                                group_dpi,
-                                profile.psm,
-                                profile.timeout_s,
-                                profile.use_table_ocr,
+                                profile.page_num, buf.getvalue(),
+                                group_dpi, profile.psm,
+                                profile.timeout_s, profile.use_table_ocr,
                             ))
                     except Exception as e:
                         logger.error(f"Page {profile.page_num} conversion failed: {e}")
@@ -399,7 +370,7 @@ def ocr_full_pdf_tesseract_parallel(
                 if not page_args:
                     continue
 
-                # OCR batch in parallel
+                # OCR with max 2 workers
                 with ThreadPoolExecutor(max_workers=max_workers) as executor:
                     futures = {
                         executor.submit(_ocr_single_page_adaptive, args): args[0]
@@ -408,13 +379,13 @@ def ocr_full_pdf_tesseract_parallel(
                     for future in as_completed(futures):
                         pnum = futures[future]
                         try:
-                            result_page, result_text = future.result(timeout=15.0)
+                            result_page, result_text = future.result(timeout=12.0)
                             all_results[result_page] = result_text
                         except Exception as e:
-                            logger.error(f"Page {pnum} timed out: {e}")
-                            all_results[pnum] = f"[Page {pnum}: timeout]"
+                            logger.error(f"Page {pnum} hard timeout: {e}")
+                            all_results[pnum] = f"[Page {pnum}: timeout, skipped]"
 
-        # Combine results in page order
+        # Combine in page order
         elapsed = time.monotonic() - t0
         sorted_pages = sorted(all_results.keys())
         text_parts = [f"--- Page {p} ---\n{all_results[p]}" for p in sorted_pages]
@@ -427,19 +398,19 @@ def ocr_full_pdf_tesseract_parallel(
         return full_text, len(all_results)
 
     except Exception as e:
-        logger.error(f"Full adaptive OCR failed: {e}")
+        logger.error(f"Full OCR failed: {e}")
         return f"[OCR FAILED: {str(e)}]", 0
 
 
 # ---------------------------------------------------------------------------
-# Convenience wrappers (unchanged interface)
+# Convenience wrappers
 # ---------------------------------------------------------------------------
 
 def ocr_full_pdf_tesseract_fast(file_bytes: io.BytesIO) -> Tuple[str, int]:
-    """Fast mode — lower DPI, more workers."""
-    return ocr_full_pdf_tesseract_parallel(file_bytes, dpi=150, batch_size=8)
+    """Fast mode — 72 DPI, 2 workers."""
+    return ocr_full_pdf_tesseract_parallel(file_bytes, dpi=72, batch_size=8)
 
 
 def ocr_full_pdf_tesseract_accurate(file_bytes: io.BytesIO) -> Tuple[str, int]:
-    """Accurate mode — higher DPI."""
-    return ocr_full_pdf_tesseract_parallel(file_bytes, dpi=300, batch_size=3)
+    """Accurate mode — moderate DPI."""
+    return ocr_full_pdf_tesseract_parallel(file_bytes, dpi=150, batch_size=3)
