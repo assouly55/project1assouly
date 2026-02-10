@@ -996,7 +996,7 @@ Analyse le marché ci-dessus et attribue les catégories les plus précises.
         return validated_categories
     
     def _validate_categories(self, categories: List[Dict]) -> List[Dict]:
-        """Validate and filter categories against the actual category tree"""
+        """Validate and filter categories against the actual category tree with fuzzy matching"""
         category_tree = _load_categories()
         validated = []
         
@@ -1010,34 +1010,60 @@ Analyse le marché ci-dessus et attribue les catégories les plus précises.
             if confidence < 0.5:
                 continue
             
-            # Check if main category exists
-            if main_cat not in category_tree:
+            # Fuzzy match main category
+            matched_main = self._fuzzy_match_key(main_cat, list(category_tree.keys()))
+            if not matched_main:
                 logger.warning(f"Invalid main category: {main_cat}")
                 continue
+            cat["main_category"] = matched_main
             
-            # Validate subcategory and item
+            # Fuzzy match subcategory
+            subcat_names = [sc.get("name", "") for sc in category_tree[matched_main]]
+            matched_subcat_name = self._fuzzy_match_key(subcat, subcat_names)
+            
             found_subcat = False
             found_item = False
+            matched_sc = None
             
-            for sc in category_tree[main_cat]:
-                if sc.get("name") == subcat:
-                    found_subcat = True
-                    for item_group in sc.get("subcategories", []):
-                        if item_group.get("name") == item:
-                            found_item = True
-                            break
-                        # Also check in items list
-                        if item in item_group.get("items", []):
-                            # Update to use the item group name instead
+            if matched_subcat_name:
+                found_subcat = True
+                cat["subcategory"] = matched_subcat_name
+                # Find the actual subcategory object
+                for sc in category_tree[matched_main]:
+                    if sc.get("name") == matched_subcat_name:
+                        matched_sc = sc
+                        break
+            else:
+                # Try all subcategories for a partial match
+                for sc in category_tree[matched_main]:
+                    sc_name = sc.get("name", "")
+                    if (subcat.lower() in sc_name.lower() or 
+                        sc_name.lower() in subcat.lower()):
+                        found_subcat = True
+                        cat["subcategory"] = sc_name
+                        matched_sc = sc
+                        break
+            
+            # Fuzzy match item within subcategory
+            if found_subcat and matched_sc and item:
+                item_group_names = [ig.get("name", "") for ig in matched_sc.get("subcategories", [])]
+                matched_item = self._fuzzy_match_key(item, item_group_names)
+                if matched_item:
+                    cat["item"] = matched_item
+                    found_item = True
+                else:
+                    # Check in items lists
+                    for item_group in matched_sc.get("subcategories", []):
+                        all_items = item_group.get("items", [])
+                        matched_in_items = self._fuzzy_match_key(item, all_items)
+                        if matched_in_items:
                             cat["item"] = item_group.get("name", item)
                             found_item = True
                             break
-                    break
             
             if found_subcat and found_item:
                 validated.append(cat)
             elif found_subcat:
-                # Keep with just subcategory level
                 cat["item"] = None
                 validated.append(cat)
             else:
@@ -1053,6 +1079,48 @@ Analyse le marché ci-dessus et attribue les catégories les plus précises.
                 unique.append(cat)
         
         return unique[:5]  # Max 5 categories
+    
+    @staticmethod
+    def _fuzzy_match_key(needle: str, haystack: List[str], threshold: float = 0.6) -> Optional[str]:
+        """Simple fuzzy matching: exact → lowercase → containment → word overlap"""
+        if not needle or not haystack:
+            return None
+        
+        needle_lower = needle.lower().strip()
+        
+        # Exact match
+        for h in haystack:
+            if h == needle:
+                return h
+        
+        # Case-insensitive match
+        for h in haystack:
+            if h.lower().strip() == needle_lower:
+                return h
+        
+        # Containment match
+        for h in haystack:
+            h_lower = h.lower().strip()
+            if needle_lower in h_lower or h_lower in needle_lower:
+                return h
+        
+        # Word overlap (Jaccard-like)
+        needle_words = set(re.findall(r'\w{3,}', needle_lower))
+        if not needle_words:
+            return None
+        
+        best_match = None
+        best_score = 0
+        for h in haystack:
+            h_words = set(re.findall(r'\w{3,}', h.lower()))
+            if not h_words:
+                continue
+            overlap = len(needle_words & h_words) / len(needle_words | h_words)
+            if overlap > best_score and overlap >= threshold:
+                best_score = overlap
+                best_match = h
+        
+        return best_match
 
 
 # Singleton instance

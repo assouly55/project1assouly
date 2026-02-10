@@ -7,6 +7,7 @@ Updated: AI-based file detection prioritizes Bordereau files before processing.
 
 import asyncio
 import io
+import time
 import zipfile
 import re
 from concurrent.futures import ThreadPoolExecutor
@@ -174,6 +175,9 @@ def split_merged_file(
     return {filename: file_bytes}  # Return original for now
 
 
+MAX_DOCUMENT_PROCESSING_SECONDS = 180  # 3 minutes hard cap per document
+
+
 def process_single_document(
     filename: str, 
     file_bytes: io.BytesIO,
@@ -299,16 +303,22 @@ async def process_documents_concurrent(
         if on_progress:
             on_progress(f"[{idx}/{total}] Processing: {filename}")
         
+        t0 = time.monotonic()
         try:
             result = process_single_document(filename, file_bytes, tender_ref, light_mode)
+            elapsed = time.monotonic() - t0
             results.append(result)
             
             if on_progress:
                 status = "✓" if result.success else "✗"
-                on_progress(f"[{idx}/{total}] {status} {filename} → {result.document_type.value}")
+                on_progress(f"[{idx}/{total}] {status} {filename} → {result.document_type.value} ({elapsed:.1f}s)")
+            
+            if elapsed > MAX_DOCUMENT_PROCESSING_SECONDS:
+                logger.warning(f"⚠ Document {filename} took {elapsed:.1f}s (>{MAX_DOCUMENT_PROCESSING_SECONDS}s limit)")
                 
         except Exception as e:
-            logger.error(f"Error processing {filename}: {e}")
+            elapsed = time.monotonic() - t0
+            logger.error(f"Error processing {filename} after {elapsed:.1f}s: {e}")
             results.append(ProcessedDocument(
                 filename=filename,
                 document_type=DocumentType.UNKNOWN,
