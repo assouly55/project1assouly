@@ -266,24 +266,23 @@ def process_single_document(
 async def process_documents_concurrent(
     files: Dict[str, io.BytesIO],
     tender_ref: Optional[str] = None,
-    max_workers: int = 5,
+    max_workers: int = 1,
     on_progress: Optional[Callable[[str], None]] = None,
     light_mode: bool = False,
 ) -> List[ProcessedDocument]:
     """
-    Process all documents concurrently using thread pool.
+    Process documents one by one sequentially for better tracking and resource usage.
     
     Args:
         files: Dict of filename -> BytesIO
         tender_ref: Tender reference for logging
-        max_workers: Number of concurrent workers (default 5)
+        max_workers: Ignored (kept for API compat), always processes sequentially
         on_progress: Optional callback for progress updates
         light_mode: If True, skip OCR for scanned PDFs (bordereau already available)
         
     Returns:
         List of ProcessedDocument results
     """
-    loop = asyncio.get_event_loop()
     results = []
     
     # Filter out hidden/temp files
@@ -292,46 +291,35 @@ async def process_documents_concurrent(
         if not k.split('/')[-1].startswith(('~$', '.', '__'))
     }
     
+    total = len(valid_files)
     if on_progress:
-        on_progress(f"Processing {len(valid_files)} documents with {max_workers} workers")
+        on_progress(f"Processing {total} documents sequentially (focused mode)")
     
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        # Submit all tasks
-        futures = []
-        for filename, file_bytes in valid_files.items():
-            future = loop.run_in_executor(
-                executor,
-                process_single_document,
-                filename,
-                file_bytes,
-                tender_ref,
-                light_mode,
-            )
-            futures.append((filename, future))
+    for idx, (filename, file_bytes) in enumerate(valid_files.items(), 1):
+        if on_progress:
+            on_progress(f"[{idx}/{total}] Processing: {filename}")
         
-        # Gather results
-        for filename, future in futures:
-            try:
-                result = await future
-                results.append(result)
+        try:
+            result = process_single_document(filename, file_bytes, tender_ref, light_mode)
+            results.append(result)
+            
+            if on_progress:
+                status = "✓" if result.success else "✗"
+                on_progress(f"[{idx}/{total}] {status} {filename} → {result.document_type.value}")
                 
-                if on_progress:
-                    status = "✓" if result.success else "✗"
-                    on_progress(f"{status} {filename} → {result.document_type.value}")
-                    
-            except Exception as e:
-                logger.error(f"Error processing {filename}: {e}")
-                results.append(ProcessedDocument(
-                    filename=filename,
-                    document_type=DocumentType.UNKNOWN,
-                    raw_text="",
-                    page_count=None,
-                    extraction_method=ExtractionMethod.DIGITAL,
-                    file_size_bytes=0,
-                    mime_type="",
-                    success=False,
-                    error=str(e)
-                ))
+        except Exception as e:
+            logger.error(f"Error processing {filename}: {e}")
+            results.append(ProcessedDocument(
+                filename=filename,
+                document_type=DocumentType.UNKNOWN,
+                raw_text="",
+                page_count=None,
+                extraction_method=ExtractionMethod.DIGITAL,
+                file_size_bytes=0,
+                mime_type="",
+                success=False,
+                error=str(e)
+            ))
     
     return results
 
