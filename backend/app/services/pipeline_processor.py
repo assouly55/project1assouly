@@ -177,7 +177,8 @@ def split_merged_file(
 def process_single_document(
     filename: str, 
     file_bytes: io.BytesIO,
-    tender_ref: Optional[str] = None
+    tender_ref: Optional[str] = None,
+    light_mode: bool = False,
 ) -> ProcessedDocument:
     """
     Process a single document: extract text, classify, and index articles.
@@ -200,12 +201,18 @@ def process_single_document(
                 error=first_page_result.error
             )
         
+        # In light_mode, skip OCR for scanned PDFs (bordereau already found via Excel)
+        effective_scanned = first_page_result.is_scanned
+        if light_mode and effective_scanned:
+            logger.info(f"⚡ Light mode: skipping OCR for scanned PDF {filename}")
+            effective_scanned = False  # Force digital extraction (fast, partial text is fine)
+        
         # Full extraction
         file_bytes.seek(0)
         extraction = extract_full_document(
             filename, 
             file_bytes, 
-            first_page_result.is_scanned
+            effective_scanned
         )
         
         if not extraction.success:
@@ -260,7 +267,8 @@ async def process_documents_concurrent(
     files: Dict[str, io.BytesIO],
     tender_ref: Optional[str] = None,
     max_workers: int = 5,
-    on_progress: Optional[Callable[[str], None]] = None
+    on_progress: Optional[Callable[[str], None]] = None,
+    light_mode: bool = False,
 ) -> List[ProcessedDocument]:
     """
     Process all documents concurrently using thread pool.
@@ -270,6 +278,7 @@ async def process_documents_concurrent(
         tender_ref: Tender reference for logging
         max_workers: Number of concurrent workers (default 5)
         on_progress: Optional callback for progress updates
+        light_mode: If True, skip OCR for scanned PDFs (bordereau already available)
         
     Returns:
         List of ProcessedDocument results
@@ -295,7 +304,8 @@ async def process_documents_concurrent(
                 process_single_document,
                 filename,
                 file_bytes,
-                tender_ref
+                tender_ref,
+                light_mode,
             )
             futures.append((filename, future))
         
@@ -458,6 +468,7 @@ async def process_tender_documents(
     logger.info(f"📋 Priority: {len(bordereau_files)} bordereau → {len(cps_files)} CPS → {len(other_files)} others")
     
     all_documents = []
+    has_excel_bordereau = False  # Track if we got bordereau from Excel (no OCR needed)
     
     # Step 3: Process BORDEREAU files FIRST (priority processing)
     if bordereau_files:
@@ -473,6 +484,18 @@ async def process_tender_documents(
         )
         all_documents.extend(bordereau_docs)
         
+        # Check if any Excel bordereau was successfully extracted
+        from app.services.extractor import is_excel_file
+        has_excel_bordereau = any(
+            d.success and d.raw_text and is_excel_file(d.filename)
+            for d in bordereau_docs
+        )
+        
+        if has_excel_bordereau:
+            logger.info("⚡ Excel bordereau found — remaining files will skip OCR")
+            if on_progress:
+                on_progress("⚡ Excel bordereau found — skipping OCR for remaining files")
+        
         # Call the callback so AI can start bordereau extraction immediately
         if on_bordereau_ready and bordereau_docs:
             successful_docs = [d for d in bordereau_docs if d.success and d.raw_text]
@@ -481,6 +504,7 @@ async def process_tender_documents(
                 on_bordereau_ready(successful_docs)
     
     # Step 4: Process CPS files (for metadata and article indexing)
+    # Use light_mode if Excel bordereau already covers items
     if cps_files:
         if on_progress:
             on_progress(f"📄 Processing {len(cps_files)} CPS files...")
@@ -490,7 +514,8 @@ async def process_tender_documents(
             cps_file_dict,
             tender_ref,
             max_workers,
-            on_progress
+            on_progress,
+            light_mode=has_excel_bordereau,
         )
         all_documents.extend(cps_docs)
         
@@ -518,7 +543,7 @@ async def process_tender_documents(
                 del other_file_dict[merged_file]
                 other_file_dict.update(split_files)
     
-    # Step 6: Process remaining files
+    # Step 6: Process remaining files (always light_mode if Excel bordereau found)
     if other_file_dict:
         if on_progress:
             on_progress(f"📄 Processing {len(other_file_dict)} remaining files...")
@@ -527,7 +552,8 @@ async def process_tender_documents(
             other_file_dict,
             tender_ref,
             max_workers,
-            on_progress
+            on_progress,
+            light_mode=has_excel_bordereau,
         )
         all_documents.extend(other_docs)
     
