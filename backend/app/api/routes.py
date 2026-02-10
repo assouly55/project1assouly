@@ -41,8 +41,8 @@ _scraper_instance: Optional[TenderScraper] = None
 _current_job_id: Optional[str] = None
 
 # Concurrent processing settings
-MAX_CONCURRENT_TENDERS = 5
-MAX_CONCURRENT_EXTRACTION = 5
+MAX_CONCURRENT_TENDERS = 1
+MAX_CONCURRENT_EXTRACTION = 1
 
 
 # ============================
