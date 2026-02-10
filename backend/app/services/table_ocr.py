@@ -230,7 +230,7 @@ def extract_word_boxes(image: Image.Image, timeout_s: float = 6.0) -> List[WordB
     try:
         data = pytesseract.image_to_data(
             image,
-            lang="fra+eng",
+            lang="fra",
             config="--oem 1 --psm 6",
             output_type=pytesseract.Output.DICT,
             timeout=timeout_s,
