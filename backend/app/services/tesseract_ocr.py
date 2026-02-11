@@ -282,15 +282,16 @@ def ocr_full_pdf_tesseract_parallel(
     batch_size: int = 5,
 ) -> Tuple[str, int]:
     """
-    Fast OCR pipeline — no pre-scan overhead:
-    1. Get page count
-    2. Convert pages at requested DPI in batches
-    3. OCR with max 2 workers, hard timeouts
+    Timeout-proof OCR pipeline:
+    1. Pre-scan at 72 DPI → classify pages
+    2. Convert at LOW DPI (72-150) per page type
+    3. OCR with max 2 workers, hard 5s timeouts
     4. 2 attempts max per page, then mark image-only
+    5. Always completes, never hangs
 
     Returns: (full_text, page_count)
     """
-    from pdf2image import convert_from_bytes, pdfinfo_from_bytes
+    from pdf2image import convert_from_bytes
 
     _configure_tesseract()
     poppler_path = _get_poppler_path()
@@ -302,63 +303,75 @@ def ocr_full_pdf_tesseract_parallel(
         file_bytes.seek(0)
         pdf_bytes = file_bytes.read()
 
-        # Get page count directly (no 72 DPI pre-scan)
-        try:
-            info = pdfinfo_from_bytes(pdf_bytes, poppler_path=poppler_path)
-            total_pages = info.get("Pages", 0)
-        except Exception:
-            total_pages = 0
-
-        if total_pages == 0:
+        # Phase 1: Pre-scan and build profiles
+        profiles = build_page_profiles(pdf_bytes)
+        if not profiles:
             return "", 0
 
-        logger.info(f"OCR starting: {total_pages} pages at {dpi} DPI, {max_workers} workers")
+        total_pages = len(profiles)
+
+        # Force ultra-fast if many pages
+        estimated_time = sum(p.timeout_s * 0.5 for p in profiles)
+        if estimated_time > 20.0:
+            logger.warning(f"Estimated {estimated_time:.0f}s — forcing ultra-fast mode")
+            for p in profiles:
+                p.dpi = 72
+                p.timeout_s = 4.0
+
+        logger.info(f"OCR starting: {total_pages} pages, {max_workers} workers")
         t0 = time.monotonic()
 
         all_results: Dict[int, str] = {}
 
-        for batch_start in range(0, total_pages, batch_size):
-            batch_end = min(batch_start + batch_size, total_pages)
-            page_nums = list(range(batch_start + 1, batch_end + 1))
+        # Group by DPI for batch conversion
+        dpi_groups: Dict[int, List[PageProfile]] = {}
+        for p in profiles:
+            dpi_groups.setdefault(p.dpi, []).append(p)
 
-            logger.info(f"Converting pages {page_nums} at {dpi} DPI...")
+        for group_dpi, group_profiles in dpi_groups.items():
+            for batch_start in range(0, len(group_profiles), batch_size):
+                batch = group_profiles[batch_start:batch_start + batch_size]
+                page_nums = [p.page_num for p in batch]
 
-            page_args = []
-            for page_num in page_nums:
-                try:
-                    images = convert_from_bytes(
-                        pdf_bytes, dpi=dpi,
-                        first_page=page_num, last_page=page_num,
-                        poppler_path=poppler_path, fmt="jpeg", thread_count=1,
-                    )
-                    if images:
-                        buf = io.BytesIO()
-                        images[0].save(buf, format="JPEG", quality=80)
-                        page_args.append((
-                            page_num, buf.getvalue(),
-                            dpi, 3, 5.0,
-                        ))
-                except Exception as e:
-                    logger.error(f"Page {page_num} conversion failed: {e}")
-                    all_results[page_num] = f"[Page {page_num} conversion failed]"
+                logger.info(f"Converting pages {page_nums} at {group_dpi} DPI...")
 
-            if not page_args:
-                continue
-
-            # OCR with max 2 workers
-            with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                futures = {
-                    executor.submit(_ocr_single_page_adaptive, args): args[0]
-                    for args in page_args
-                }
-                for future in as_completed(futures):
-                    pnum = futures[future]
+                page_args = []
+                for profile in batch:
                     try:
-                        result_page, result_text = future.result(timeout=12.0)
-                        all_results[result_page] = result_text
+                        images = convert_from_bytes(
+                            pdf_bytes, dpi=group_dpi,
+                            first_page=profile.page_num, last_page=profile.page_num,
+                            poppler_path=poppler_path, fmt="jpeg", thread_count=1,
+                        )
+                        if images:
+                            buf = io.BytesIO()
+                            images[0].save(buf, format="PNG", optimize=True)
+                            page_args.append((
+                                profile.page_num, buf.getvalue(),
+                                group_dpi, profile.psm,
+                                profile.timeout_s,
+                            ))
                     except Exception as e:
-                        logger.error(f"Page {pnum} hard timeout: {e}")
-                        all_results[pnum] = f"[Page {pnum}: timeout, skipped]"
+                        logger.error(f"Page {profile.page_num} conversion failed: {e}")
+                        all_results[profile.page_num] = f"[Page {profile.page_num} conversion failed]"
+
+                if not page_args:
+                    continue
+
+                # OCR with max 2 workers
+                with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    futures = {
+                        executor.submit(_ocr_single_page_adaptive, args): args[0]
+                        for args in page_args
+                    }
+                    for future in as_completed(futures):
+                        pnum = futures[future]
+                        try:
+                            result_page, result_text = future.result(timeout=12.0)
+                            all_results[result_page] = result_text
+                        except Exception as e:
+                            logger.error(f"Page {pnum} hard timeout: {e}")
+                            all_results[pnum] = f"[Page {pnum}: timeout, skipped]"
 
         # Combine in page order
         elapsed = time.monotonic() - t0
