@@ -666,6 +666,16 @@ Q: {question}
             result.setdefault("follow_up_questions", [])
             result.setdefault("language", "fr")
             result["_articles_used"] = len(selected_articles)
+            
+            # Step 5: If AI couldn't answer from selected articles, fallback to ALL documents
+            if self._answer_indicates_uncertainty(result.get("answer", "")):
+                logger.info("⚠️ AI uncertain from selected articles — falling back to ALL documents")
+                fallback_result = self._ask_ai_fallback(question, documents, tender_reference)
+                if fallback_result and not self._answer_indicates_uncertainty(fallback_result.get("answer", "")):
+                    fallback_result["_source"] = "full_document_fallback"
+                    return fallback_result
+                logger.info("📭 Full-document fallback also couldn't find answer")
+            
             return result
         
         # Clean markdown if present
@@ -675,6 +685,15 @@ Q: {question}
             clean_response = "\n".join(lines[1:-1]) if len(lines) > 2 else response
         
         logger.warning("Ask AI returned non-JSON response, wrapping as plain text")
+        
+        # Also check plain text for uncertainty
+        if self._answer_indicates_uncertainty(clean_response):
+            logger.info("⚠️ AI uncertain (plain text) — falling back to ALL documents")
+            fallback_result = self._ask_ai_fallback(question, documents, tender_reference)
+            if fallback_result and not self._answer_indicates_uncertainty(fallback_result.get("answer", "")):
+                fallback_result["_source"] = "full_document_fallback"
+                return fallback_result
+        
         return {
             "answer": clean_response,
             "citations": [],
@@ -683,6 +702,25 @@ Q: {question}
             "_articles_used": len(selected_articles)
         }
     
+    @staticmethod
+    def _answer_indicates_uncertainty(answer: str) -> bool:
+        """Detect if the AI's answer indicates it couldn't find the information."""
+        if not answer:
+            return True
+        a = answer.lower()
+        uncertainty_phrases = [
+            "ne contient pas", "pas mentionné", "pas trouvé",
+            "aucune information", "pas d'information",
+            "ne figure pas", "ne mentionne pas",
+            "pas disponible", "n'est pas disponible",
+            "impossible de répondre", "je ne peux pas",
+            "documents fournis ne", "ne permettent pas",
+            "لا يحتوي", "لا توجد معلومات", "غير متوفر",
+            "not found", "not mentioned", "no information",
+            "cannot answer", "unable to find",
+        ]
+        return any(phrase in a for phrase in uncertainty_phrases)
+
     @staticmethod
     def _is_item_related_question(question: str) -> bool:
         """Check if question is about items, quantities, prices (bordereau-related)."""
@@ -783,6 +821,15 @@ Q: {question}
             result.setdefault("follow_up_questions", [])
             result.setdefault("language", "fr")
             result["_source"] = "bordereau_primary"
+            
+            # If bordereau-focused answer is uncertain, fallback to ALL documents
+            if self._answer_indicates_uncertainty(result.get("answer", "")):
+                logger.info("⚠️ Bordereau context insufficient — falling back to ALL documents")
+                fallback_result = self._ask_ai_fallback(question, documents, tender_reference)
+                if fallback_result and not self._answer_indicates_uncertainty(fallback_result.get("answer", "")):
+                    fallback_result["_source"] = "full_document_fallback"
+                    return fallback_result
+            
             return result
         
         return {
@@ -972,21 +1019,29 @@ Q: {question}
         documents: List[ExtractionResult],
         tender_reference: Optional[str]
     ) -> Dict[str, Any]:
-        """Fallback when no article index is available - use truncated content."""
+        """
+        Full-document fallback: search ALL documents with generous content limits.
+        Used when article-based or bordereau-based answers indicate uncertainty.
+        """
+        logger.info(f"🔍 Full-document fallback: searching {len(documents)} documents")
         context_parts = []
         for doc in documents:
             if doc.text:
                 doc_type = doc.document_type.value if hasattr(doc.document_type, 'value') else str(doc.document_type)
-                context_parts.append(f"=== {doc_type}: {doc.filename} ===\n{doc.text[:10000]}")
+                # Use generous limits — up to 15000 chars per doc
+                context_parts.append(f"=== {doc_type}: {doc.filename} ===\n{doc.text[:15000]}")
         
         full_context = "\n\n".join(context_parts)
+        logger.info(f"   Full context: {len(full_context)} chars from {len(context_parts)} documents")
         
         user_prompt = f"""RÉFÉRENCE: {tender_reference or 'N/A'}
 
 QUESTION: {question}
 
-DOCUMENTS (extraits):
-{full_context[:40000]}
+IMPORTANT: Cherchez la réponse dans TOUS les documents ci-dessous. La réponse peut se trouver dans n'importe quel document ou section.
+
+DOCUMENTS COMPLETS:
+{full_context[:50000]}
 """
         
         response = self._call_ai(
