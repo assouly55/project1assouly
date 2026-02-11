@@ -178,11 +178,9 @@ def analyze_bordereau_pages(
 
     # Send to Azure DI
     try:
-        from azure.ai.documentintelligence.models import AnalyzeDocumentRequest
-
         poller = client.begin_analyze_document(
             "prebuilt-layout",
-            analyze_request=AnalyzeDocumentRequest(bytes_source=subset_pdf),
+            body=subset_pdf,
             content_type="application/octet-stream",
         )
         result = poller.result()
@@ -263,6 +261,104 @@ def analyze_bordereau_pages(
 # Drop-in replacement for table_ocr.reocr_bordereau_pages
 # ---------------------------------------------------------------------------
 
+def _ai_detect_bordereau_pages(ocr_text: str) -> List[int]:
+    """
+    Use AI to identify which pages in the OCR text contain
+    Bordereau des Prix tables. Returns sorted consecutive page numbers.
+    """
+    import json
+    from openai import OpenAI
+    from app.core.config import settings
+
+    if not settings.DEEPSEEK_API_KEY:
+        logger.warning("DeepSeek API key not configured, falling back to regex detection")
+        from app.services.table_ocr import detect_bordereau_pages
+        return detect_bordereau_pages(ocr_text)
+
+    # Build a compact page summary for AI (first 300 chars per page)
+    pages = re.split(r'---\s*Page\s+(\d+)\s*---', ocr_text)
+    page_summaries = []
+    for i in range(1, len(pages), 2):
+        if i + 1 < len(pages):
+            page_num = pages[i]
+            content = pages[i + 1].strip()[:300]
+            page_summaries.append(f"Page {page_num}: {content}")
+
+    if not page_summaries:
+        return []
+
+    summary_text = "\n\n".join(page_summaries)
+
+    prompt = """Tu es un expert en marchés publics marocains. Analyse le résumé OCR de chaque page et identifie UNIQUEMENT les pages qui contiennent le Bordereau des Prix / Détail Estimatif (tableau avec des articles, prix unitaires, quantités, montants).
+
+INDICES D'UNE PAGE BORDEREAU:
+- Tableau avec colonnes: N°, Désignation, Unité, Quantité, Prix Unitaire, Montant
+- Lignes numérotées avec des articles/prestations et des prix
+- En-têtes comme "Bordereau des Prix", "Détail Estimatif", "BPDE"
+- Pages successives d'un même tableau (le bordereau s'étend souvent sur plusieurs pages consécutives)
+
+IMPORTANT:
+- Les pages bordereau sont TOUJOURS consécutives (ex: 5,6,7,8 jamais 5,8,12)
+- Si tu trouves le début du bordereau, inclus toutes les pages suivantes qui continuent le tableau
+- Ne confonds PAS avec: table des matières, clauses CPS, conditions générales
+
+Retourne UNIQUEMENT un JSON: {"pages": [5, 6, 7, 8]}
+Si aucune page bordereau n'est trouvée, retourne: {"pages": []}"""
+
+    try:
+        client = OpenAI(
+            api_key=settings.DEEPSEEK_API_KEY,
+            base_url=settings.DEEPSEEK_BASE_URL,
+        )
+        response = client.chat.completions.create(
+            model=settings.DEEPSEEK_MODEL,
+            messages=[
+                {"role": "system", "content": prompt},
+                {"role": "user", "content": f"RÉSUMÉ OCR DES PAGES:\n\n{summary_text}"},
+            ],
+            max_tokens=256,
+            temperature=0,
+        )
+        result_text = response.choices[0].message.content.strip()
+
+        # Parse JSON
+        json_str = result_text
+        if "```json" in result_text:
+            json_str = result_text.split("```json")[1].split("```")[0]
+        elif "```" in result_text:
+            json_str = result_text.split("```")[1].split("```")[0]
+
+        data = json.loads(json_str.strip())
+        detected = sorted(data.get("pages", []))
+
+        # Validate consecutive constraint
+        if detected:
+            consecutive_groups = []
+            current_group = [detected[0]]
+            for p in detected[1:]:
+                if p == current_group[-1] + 1:
+                    current_group.append(p)
+                else:
+                    consecutive_groups.append(current_group)
+                    current_group = [p]
+            consecutive_groups.append(current_group)
+            # Pick the longest consecutive group
+            best_group = max(consecutive_groups, key=len)
+            logger.info(
+                f"🤖 AI detected bordereau pages: {best_group} "
+                f"(from {len(consecutive_groups)} group(s))"
+            )
+            return best_group
+
+        logger.info("🤖 AI found no bordereau pages")
+        return []
+
+    except Exception as e:
+        logger.error(f"AI bordereau page detection failed: {e}")
+        from app.services.table_ocr import detect_bordereau_pages
+        return detect_bordereau_pages(ocr_text)
+
+
 def reocr_bordereau_pages_azure(
     file_bytes: io.BytesIO,
     original_text: str,
@@ -272,23 +368,24 @@ def reocr_bordereau_pages_azure(
     Re-process bordereau pages using Azure Document Intelligence,
     replacing plain OCR text with structured table output.
 
-    This is a drop-in replacement for table_ocr.reocr_bordereau_pages.
+    Uses AI to detect which pages contain bordereau tables (consecutive
+    page ranges), then sends only those to Azure DI for high-fidelity
+    extraction.
+
     Falls back to the original text if Azure DI is not configured or fails.
     """
-    import re
-    from app.services.table_ocr import detect_bordereau_pages
 
     if force_pages:
         bordereau_pages = force_pages
     else:
-        bordereau_pages = detect_bordereau_pages(original_text)
+        bordereau_pages = _ai_detect_bordereau_pages(original_text)
 
     if not bordereau_pages:
         logger.info("No bordereau pages detected, keeping original OCR")
         return original_text
 
     # Limit pages
-    MAX_PAGES = 20
+    MAX_PAGES = 15
     if len(bordereau_pages) > MAX_PAGES:
         logger.warning(
             f"Too many bordereau pages ({len(bordereau_pages)}), "
