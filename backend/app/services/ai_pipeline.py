@@ -589,20 +589,28 @@ class AIService:
         self,
         question: str,
         documents: List[ExtractionResult],
-        tender_reference: Optional[str] = None
+        tender_reference: Optional[str] = None,
+        bordereau_metadata: Optional[Dict[str, Any]] = None
     ) -> Optional[Dict[str, Any]]:
         """
         Phase 3: Answer questions about tender documents.
         
         Optimized flow:
-        1. Fast keyword-based article pre-filter
-        2. AI selection only if needed
+        1. For item-related questions: use bordereau_metadata as PRIMARY source
+        2. For other questions: keyword-based article pre-filter → AI selection
         3. Minimal context, fast response
         """
         if not question or not documents:
             return None
         
         logger.info(f"Ask AI: '{question[:50]}...'")
+        
+        # Step 0: Check if question is item-related AND we have bordereau data
+        if bordereau_metadata and self._is_item_related_question(question):
+            logger.info("📦 Item-related question — using bordereau data as primary source")
+            return self._ask_ai_with_bordereau_context(
+                question, bordereau_metadata, documents, tender_reference
+            )
         
         # Step 1: Build article index
         article_index = self._build_article_index_for_ask(documents)
@@ -673,6 +681,116 @@ Q: {question}
             "follow_up_questions": [],
             "language": "fr",
             "_articles_used": len(selected_articles)
+        }
+    
+    @staticmethod
+    def _is_item_related_question(question: str) -> bool:
+        """Check if question is about items, quantities, prices (bordereau-related)."""
+        q = question.lower()
+        item_keywords = [
+            "article", "articles", "item", "items",
+            "quantité", "quantités", "quantite",
+            "prix", "montant", "coût", "cout",
+            "bordereau", "fourniture", "fournitures",
+            "produit", "produits", "livrer", "fournir",
+            "désignation", "designation",
+            "unité", "unite",
+            "lot", "lots",
+            "المواد", "الكميات", "الأسعار",
+            "combien", "liste",
+        ]
+        return any(kw in q for kw in item_keywords)
+    
+    def _ask_ai_with_bordereau_context(
+        self,
+        question: str,
+        bordereau_metadata: Dict[str, Any],
+        documents: List[ExtractionResult],
+        tender_reference: Optional[str]
+    ) -> Dict[str, Any]:
+        """
+        Answer item-related questions using bordereau data as PRIMARY source,
+        supplemented by document context for additional details.
+        """
+        # Build bordereau context (primary)
+        bordereau_context = "=== SOURCE PRIMAIRE: BORDEREAU DES PRIX ===\n"
+        bordereau_context += "(Ces données proviennent de l'extraction structurée du bordereau)\n\n"
+        
+        lots = bordereau_metadata.get("lots_articles", [])
+        for lot in lots:
+            lot_num = lot.get("numero_lot", lot.get("lot_numero", "Unique"))
+            lot_objet = lot.get("objet_lot", "")
+            articles = lot.get("articles", [])
+            
+            bordereau_context += f"--- Lot {lot_num}"
+            if lot_objet:
+                bordereau_context += f": {lot_objet}"
+            bordereau_context += f" ({len(articles)} articles) ---\n"
+            
+            for art in articles:
+                num = art.get("numero_prix", "")
+                desig = art.get("designation", art.get("description", ""))
+                qty = art.get("quantite", "")
+                unite = art.get("unite", "")
+                
+                line = f"  N°{num}: {desig}"
+                if qty:
+                    line += f" | Qté: {qty}"
+                if unite:
+                    line += f" {unite}"
+                bordereau_context += line + "\n"
+            bordereau_context += "\n"
+        
+        # Add supplementary document context (CPS specs for items)
+        supplementary = ""
+        for doc in documents:
+            if doc.text and doc.document_type in [
+                ExtractionResult.__class__,  # Just check if it's CPS
+            ]:
+                pass
+        
+        # Get CPS content for specifications
+        for doc in documents:
+            doc_type = doc.document_type.value if hasattr(doc.document_type, 'value') else str(doc.document_type)
+            if doc_type == "CPS" and doc.text:
+                supplementary += f"\n=== SOURCE COMPLÉMENTAIRE: CPS (spécifications) ===\n"
+                supplementary += doc.text[:8000]
+                break
+        
+        user_prompt = f"""REF: {tender_reference or '-'}
+Q: {question}
+
+{bordereau_context}
+{supplementary}"""
+        
+        response = self._call_ai(
+            get_ask_ai_prompt(),
+            user_prompt,
+            max_tokens=4096
+        )
+        
+        if not response:
+            return {
+                "answer": "Je n'ai pas pu traiter votre demande. Veuillez réessayer.",
+                "citations": [],
+                "follow_up_questions": [],
+                "language": "fr"
+            }
+        
+        result = self._parse_json_response(response)
+        if result:
+            result.setdefault("citations", [])
+            result.setdefault("follow_up_questions", [])
+            result.setdefault("language", "fr")
+            result["_source"] = "bordereau_primary"
+            return result
+        
+        return {
+            "answer": response.strip(),
+            "citations": [{"document": "Bordereau des Prix"}],
+            "follow_up_questions": [],
+            "language": "fr",
+            "_source": "bordereau_primary"
         }
     
     def _build_article_index_for_ask(self, documents: List[ExtractionResult]) -> List[Dict]:

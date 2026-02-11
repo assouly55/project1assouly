@@ -24,6 +24,10 @@ class Settings(BaseSettings):
     DEEPSEEK_BASE_URL: str = "https://api.deepseek.com/v1"
     DEEPSEEK_MODEL: str = "deepseek-chat"
     
+    # Azure Document Intelligence (for bordereau table extraction)
+    AZURE_DI_ENDPOINT: str = ""
+    AZURE_DI_KEY: str = ""
+    
     # Scraper Configuration
     SCRAPER_HEADLESS: bool = False  # TEMP: Disabled for debugging popup click
     SCRAPER_MAX_CONCURRENT: int = 5

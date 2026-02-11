@@ -36,6 +36,7 @@ requests>=2.31.0
 
 # AI
 openai>=1.12.0  # DeepSeek uses OpenAI-compatible API
+azure-ai-documentintelligence>=1.0.0  # Azure DI for bordereau table extraction
 
 # Utilities
 python-dotenv>=1.0.1
