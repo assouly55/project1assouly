@@ -14,6 +14,7 @@ table extraction from scanned PDFs. Regular OCR stays with Tesseract.
 """
 
 import io
+import re
 import time
 from typing import Dict, List, Optional, Tuple
 from loguru import logger
