@@ -682,13 +682,15 @@ def _extract_full_pdf_ocr(file_bytes: io.BytesIO) -> Tuple[str, int]:
     """
     Full OCR extraction from scanned PDF — two-step pipeline:
     
-    Step 1: Fast plain-text OCR of all pages (no table detection).
+    Step 1: Fast plain-text OCR of all pages via Tesseract.
             This text is kept for indexing and general use.
-    Step 2: Detect bordereau pages from the OCR text, then re-OCR 
-            only those pages with the coordinate-based table pipeline
-            (OpenCV grid + Tesseract word boxes → LaTeX).
-            The LaTeX output replaces the plain text for those pages,
-            giving the AI structured column data for item extraction.
+    Step 2: Detect bordereau pages from the OCR text, then re-process
+            only those pages with Azure Document Intelligence for
+            high-fidelity table extraction. Azure output replaces
+            the plain text for those pages, giving the AI structured
+            column data for item extraction.
+            Falls back to coordinate-based table OCR if Azure DI
+            is not configured.
     """
     try:
         from app.services.tesseract_ocr import ocr_full_pdf_tesseract_parallel
@@ -699,23 +701,39 @@ def _extract_full_pdf_ocr(file_bytes: io.BytesIO) -> Tuple[str, int]:
         if not text or "[OCR FAILED" in text:
             return text, page_count
         
-        # Step 2: Detect bordereau pages from OCR text → re-OCR with table pipeline → LaTeX
+        # Step 2: Detect bordereau pages → re-process with Azure DI (or fallback)
         try:
-            from app.services.table_ocr import reocr_bordereau_pages
+            from app.core.config import settings
             
-            file_bytes.seek(0)
-            enhanced_text = reocr_bordereau_pages(file_bytes, text)
-            
-            if enhanced_text != text:
-                logger.info("✅ Bordereau pages enhanced with coordinate-based LaTeX table OCR")
-            
-            return enhanced_text, page_count
-            
-        except ImportError:
-            logger.warning("TableOCR not available, using Tesseract results only")
+            if settings.AZURE_DI_ENDPOINT and settings.AZURE_DI_KEY:
+                # Primary: Azure Document Intelligence
+                from app.services.azure_doc_intelligence import reocr_bordereau_pages_azure
+                
+                file_bytes.seek(0)
+                enhanced_text = reocr_bordereau_pages_azure(file_bytes, text)
+                
+                if enhanced_text != text:
+                    logger.info("✅ Bordereau pages enhanced with Azure Document Intelligence")
+                
+                return enhanced_text, page_count
+            else:
+                # Fallback: coordinate-based table OCR (Tesseract + OpenCV)
+                logger.info("Azure DI not configured, using coordinate-based table OCR fallback")
+                from app.services.table_ocr import reocr_bordereau_pages
+                
+                file_bytes.seek(0)
+                enhanced_text = reocr_bordereau_pages(file_bytes, text)
+                
+                if enhanced_text != text:
+                    logger.info("✅ Bordereau pages enhanced with coordinate-based table OCR")
+                
+                return enhanced_text, page_count
+                
+        except ImportError as e:
+            logger.warning(f"Table enhancement not available: {e}")
             return text, page_count
         except Exception as e:
-            logger.warning(f"TableOCR enhancement failed, using Tesseract: {e}")
+            logger.warning(f"Table enhancement failed, using Tesseract: {e}")
             return text, page_count
         
     except Exception as e:

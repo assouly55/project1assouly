@@ -1193,7 +1193,8 @@ def ask_ai_about_tender(
     result = ai_service.ask_ai(
         request.question, 
         extraction_results,
-        tender_reference=tender.external_reference
+        tender_reference=tender.external_reference,
+        bordereau_metadata=tender.bordereau_metadata
     )
     
     elapsed_ms = int((time.time() - start_time) * 1000)
