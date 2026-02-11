@@ -715,9 +715,17 @@ Q: {question}
             "pas disponible", "n'est pas disponible",
             "impossible de répondre", "je ne peux pas",
             "documents fournis ne", "ne permettent pas",
+            "ne sont pas détaillé", "ne sont pas précisé",
+            "pas détaillé dans", "pas précisé dans",
+            "seules la désignation", "seules les",
+            "n'est pas spécifié", "non spécifié",
+            "n'apparaît pas", "n'apparaissent pas",
+            "pas de détail", "sans détail",
+            "information non disponible", "données insuffisantes",
             "لا يحتوي", "لا توجد معلومات", "غير متوفر",
             "not found", "not mentioned", "no information",
             "cannot answer", "unable to find",
+            "not detailed", "not specified",
         ]
         return any(phrase in a for phrase in uncertainty_phrases)
 
