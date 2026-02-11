@@ -140,15 +140,15 @@ def build_page_profiles(pdf_bytes: bytes) -> List[PageProfile]:
         thumb.save(buf, format="JPEG", quality=50)
         page_type = _classify_page_complexity(buf.getvalue())
 
-        # LOW DPI defaults — pure text OCR only (no table detection here)
+        # DPI defaults — pure text OCR only (no table detection here)
         if page_type == PageType.SIMPLE_TEXT:
-            profile = PageProfile(i + 1, page_type, dpi=72, psm=3, timeout_s=5.0)
+            profile = PageProfile(i + 1, page_type, dpi=100, psm=3, timeout_s=8.0)
         elif page_type == PageType.MEDIUM_TABLE:
-            profile = PageProfile(i + 1, page_type, dpi=100, psm=6, timeout_s=6.0)
+            profile = PageProfile(i + 1, page_type, dpi=120, psm=6, timeout_s=10.0)
         elif page_type == PageType.COMPLEX_TABLE:
-            profile = PageProfile(i + 1, page_type, dpi=150, psm=6, timeout_s=8.0)
+            profile = PageProfile(i + 1, page_type, dpi=150, psm=6, timeout_s=10.0)
         else:  # IMAGE_HEAVY
-            profile = PageProfile(i + 1, page_type, dpi=72, psm=1, timeout_s=4.0)
+            profile = PageProfile(i + 1, page_type, dpi=100, psm=1, timeout_s=6.0)
 
         profiles.append(profile)
 
@@ -208,11 +208,30 @@ def _ocr_single_page_adaptive(args: Tuple[int, bytes, int, int, float]) -> Tuple
 
 
 def _ocr_fallback_ultra(page_num: int, img_bytes: bytes) -> Tuple[int, str]:
-    """Ultra-fast last resort: 25% size, 3s timeout, then give up."""
+    """Multi-level fallback: try 50% size, then 25% size, then give up."""
     import pytesseract
-    from PIL import Image
+    from PIL import Image, ImageEnhance
 
     _configure_tesseract()
+
+    # Level 2: 50% size, higher timeout
+    try:
+        img = Image.open(io.BytesIO(img_bytes)).convert("L")
+        img = img.resize((img.width // 2, img.height // 2), Image.LANCZOS)
+        img = ImageEnhance.Contrast(img).enhance(1.5)
+
+        text = pytesseract.image_to_string(
+            img, lang="fra",
+            config="--oem 1 --psm 3",
+            timeout=8.0,
+        )
+        if text.strip():
+            logger.info(f"Page {page_num} recovered via 50% fallback")
+            return (page_num, text.strip())
+    except Exception as e:
+        logger.debug(f"Page {page_num} 50% fallback failed: {e}")
+
+    # Level 3: 25% size, last resort
     try:
         img = Image.open(io.BytesIO(img_bytes)).convert("L")
         img = img.resize((img.width // 4, img.height // 4), Image.LANCZOS)
@@ -220,10 +239,10 @@ def _ocr_fallback_ultra(page_num: int, img_bytes: bytes) -> Tuple[int, str]:
         text = pytesseract.image_to_string(
             img, lang="fra",
             config="--oem 1 --psm 3",
-            timeout=3.0,
+            timeout=5.0,
         )
         if text.strip():
-            logger.info(f"Page {page_num} recovered via ultra-fast fallback")
+            logger.info(f"Page {page_num} recovered via 25% fallback")
             return (page_num, text.strip())
     except Exception:
         pass
