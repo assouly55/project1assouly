@@ -1123,6 +1123,81 @@ async def _redownload_tender_documents_async(tender: Tender, db: Session) -> Lis
             await browser.close()
 
 
+class TechnicalPagesResponse(BaseModel):
+    success: bool
+    pdf_base64: Optional[str] = None
+    source_document: Optional[str] = None
+    pages: Optional[List[int]] = None
+    page_count: Optional[int] = None
+    reasoning: Optional[str] = None
+    confidence: Optional[float] = None
+    error: Optional[str] = None
+
+
+@router.post("/api/tenders/{tender_id}/technical-pages", response_model=TechnicalPagesResponse)
+def extract_technical_pages(
+    tender_id: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Extract technical specification pages from a tender's documents.
+    
+    Flow:
+    1. AI identifies which document has technical specs (usually CPS)
+    2. AI identifies exact pages with technical attributes
+    3. Re-downloads the tender ZIP
+    4. Extracts those pages as a PDF
+    5. Returns base64-encoded PDF
+    """
+    from app.services.technical_pages_extractor import extract_technical_pages_sync
+    from loguru import logger
+    
+    tender = db.query(Tender).filter(Tender.id == tender_id).first()
+    if not tender:
+        raise HTTPException(404, "Tender not found")
+    
+    if not tender.source_url:
+        return TechnicalPagesResponse(
+            success=False,
+            error="No source URL available for this tender"
+        )
+    
+    documents = list(tender.documents)
+    if not documents:
+        return TechnicalPagesResponse(
+            success=False,
+            error="No documents available for this tender"
+        )
+    
+    logger.info(f"🔧 Technical pages extraction requested for tender {tender_id}")
+    
+    try:
+        result = extract_technical_pages_sync(tender, documents)
+        
+        if not result:
+            return TechnicalPagesResponse(
+                success=False,
+                error="Could not identify or extract technical pages from the documents"
+            )
+        
+        return TechnicalPagesResponse(
+            success=True,
+            pdf_base64=result["pdf_base64"],
+            source_document=result["source_document"],
+            pages=result["pages"],
+            page_count=result["page_count"],
+            reasoning=result["reasoning"],
+            confidence=result["confidence"],
+        )
+        
+    except Exception as e:
+        logger.error(f"Technical pages extraction failed: {e}")
+        return TechnicalPagesResponse(
+            success=False,
+            error=f"Extraction failed: {str(e)}"
+        )
+
+
 @router.post("/api/tenders/{tender_id}/ask", response_model=AskAIResponse)
 def ask_ai_about_tender(
     tender_id: str,

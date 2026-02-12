@@ -26,6 +26,18 @@ export interface AskAIResponseData {
   clarification_options?: ClarificationOption[];
 }
 
+// Technical pages response
+export interface TechnicalPagesResponse {
+  success: boolean;
+  pdf_base64?: string;
+  source_document?: string;
+  pages?: number[];
+  page_count?: number;
+  reasoning?: string;
+  confidence?: number;
+  error?: string;
+}
+
 // Backend URL
 //
 // Local development: use a relative base URL so Vite can proxy /api and /health
@@ -155,6 +167,19 @@ class TenderApiClient {
     return this.request(`/api/tenders/${tenderId}/ask`, {
       method: 'POST',
       body: JSON.stringify({ question }),
+    });
+  }
+
+  // ============================
+  // TECHNICAL PAGES ENDPOINT
+  // ============================
+
+  /**
+   * Extract technical specification pages from a tender's documents
+   */
+  async extractTechnicalPages(tenderId: string): Promise<ApiResponse<TechnicalPagesResponse>> {
+    return this.request(`/api/tenders/${tenderId}/technical-pages`, {
+      method: 'POST',
     });
   }
 

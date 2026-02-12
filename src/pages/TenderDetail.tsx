@@ -1,6 +1,6 @@
 import { useParams, Link, useSearchParams } from 'react-router-dom';
 import { useEffect, useState, useMemo } from 'react';
-import { ArrowLeft, ExternalLink, Bot, FileText, RefreshCw, Loader2, CheckCircle2, AlertCircle, User, Mail, Phone, Building2, Tag, MessageSquare } from 'lucide-react';
+import { ArrowLeft, ExternalLink, Bot, FileText, RefreshCw, Loader2, CheckCircle2, AlertCircle, User, Mail, Phone, Building2, Tag, MessageSquare, FileSearch } from 'lucide-react';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { StatusBadge } from '@/components/dashboard/StatusBadge';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
@@ -9,6 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Progress } from '@/components/ui/progress';
 import { api } from '@/lib/api';
 import { AskAIChat } from '@/components/tenders/AskAIChat';
+import { TechnicalPagesViewer } from '@/components/tenders/TechnicalPagesViewer';
 import type { Tender, TenderLot, BordereauItem, LotArticles, AvisMetadata, BordereauMetadata, TenderCategory } from '@/types/tender';
 
 // Merged lot with both avis and bordereau items
@@ -526,6 +527,10 @@ export default function TenderDetail() {
             </p>
           </div>
           <div className="flex gap-2">
+            <TechnicalPagesViewer
+              tenderId={tender.id}
+              tenderReference={tender.external_reference}
+            />
             <Button variant="outline" size="sm" asChild>
               <a href={tender.source_url} target="_blank" rel="noopener noreferrer">
                 <ExternalLink className="w-4 h-4 mr-2" />
