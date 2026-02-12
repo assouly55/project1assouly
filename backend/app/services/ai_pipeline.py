@@ -582,25 +582,28 @@ class AIService:
         return self.extract_bordereau_items_smart(doc_dicts, existing_lots)
 
     # =========================================================================
-    # PHASE 3: Ask AI (Q&A) — Multi-Stage Intelligent Pipeline
+    # PHASE 3: Ask AI (Q&A) — Map-Based Intelligent Pipeline
     # =========================================================================
     
     def ask_ai(
         self,
         question: str,
-        documents: List[ExtractionResult],
+        documents: List[Dict[str, Any]],
         tender_reference: Optional[str] = None,
         bordereau_metadata: Optional[Dict[str, Any]] = None
     ) -> Optional[Dict[str, Any]]:
         """
-        Phase 3: Answer questions about tender documents.
+        Phase 3: Answer questions about tender documents using AI-powered document maps.
         
-        Multi-stage pipeline:
-        1. Classify question → determine document fallback chain
-        2. Build targeted context from indexed articles (smart selection)
-        3. Call AI with targeted context
-        4. Validate answer completeness
-        5. If incomplete → fallback: full document reading with chunking
+        Pipeline:
+        1. Digest question → understand intent, extract key entities
+        2. Scan all document maps → select relevant articles by title+summary
+        3. Extract targeted article content → build focused context
+        4. Call AI with focused context
+        5. If answer incomplete → chunked fallback over full documents
+        
+        Args:
+            documents: List of dicts with keys: filename, document_type, raw_text, document_map
         """
         if not question or not documents:
             return None
@@ -608,16 +611,28 @@ class AIService:
         logger.info(f"🤖 Ask AI: '{question[:80]}...'")
         logger.info(f"   📚 Available: {len(documents)} documents, bordereau={'yes' if bordereau_metadata else 'no'}")
         
-        # === STAGE 1: Classify question & determine document chain ===
+        # === STAGE 1: Classify question & extract search targets ===
         q_type, doc_chain = self._classify_question(question)
-        logger.info(f"   🎯 Question type: {q_type}, Doc chain: {[d for d in doc_chain]}")
+        search_keywords = self._extract_search_keywords(question)
+        article_num_match = re.search(r"article\s*(?:n[°o]?\s*)?(\d+)", question.lower())
+        target_article_num = article_num_match.group(1) if article_num_match else None
         
-        # === STAGE 2: Build targeted context from indexed articles ===
-        targeted_context = self._build_targeted_context(
-            question, q_type, doc_chain, documents, bordereau_metadata
+        logger.info(f"   🎯 Type: {q_type}, Chain: {doc_chain}, Keywords: {search_keywords[:5]}, Target article: {target_article_num}")
+        
+        # === STAGE 2: Scan document maps to find relevant articles ===
+        selected_articles = self._select_from_maps(
+            question, q_type, doc_chain, documents, 
+            target_article_num, search_keywords
         )
         
-        # === STAGE 3: Call AI with targeted context ===
+        logger.info(f"   📍 Selected {len(selected_articles)} article sections from maps")
+        
+        # === STAGE 3: Build targeted context from selected articles ===
+        targeted_context = self._build_map_context(
+            selected_articles, documents, bordereau_metadata, q_type
+        )
+        
+        # === STAGE 4: Call AI ===
         result = self._call_ask_ai(question, tender_reference, targeted_context)
         
         if not result:
@@ -628,21 +643,20 @@ class AIService:
                 "language": "fr"
             }
         
-        # === STAGE 4: Validate answer completeness ===
+        # === STAGE 5: Validate completeness ===
         completeness = result.get("completeness", "COMPLETE")
         missing_info = result.get("missing_info", "")
         
         if completeness == "COMPLETE":
-            logger.info(f"   ✅ Answer is COMPLETE from targeted context")
+            logger.info(f"   ✅ Answer COMPLETE from targeted context")
             return self._clean_result(result)
         
-        logger.info(f"   ⚠ Answer is {completeness}: {missing_info}")
+        logger.info(f"   ⚠ Answer {completeness}: {missing_info}")
         
-        # === STAGE 5: Fallback — full document reading with chunking ===
-        logger.info(f"   🔄 Fallback: reading full documents with chunking...")
-        fallback_context = self._build_fallback_context(
-            question, q_type, doc_chain, documents, bordereau_metadata,
-            exclude_already_used=targeted_context.get("_docs_used", [])
+        # === STAGE 6: Fallback — full document chunked reading ===
+        logger.info(f"   🔄 Fallback: chunked full document scan...")
+        fallback_context = self._build_chunked_fallback(
+            question, q_type, doc_chain, documents, bordereau_metadata
         )
         
         if fallback_context.get("content"):
@@ -655,20 +669,254 @@ class AIService:
             if fallback_result:
                 fb_completeness = fallback_result.get("completeness", "COMPLETE")
                 if fb_completeness == "COMPLETE" or len(fallback_result.get("answer", "")) > len(result.get("answer", "")):
-                    logger.info(f"   ✅ Fallback improved answer (completeness: {fb_completeness})")
+                    logger.info(f"   ✅ Fallback improved answer ({fb_completeness})")
                     return self._clean_result(fallback_result)
         
-        # Return best answer we have
-        logger.info(f"   📝 Returning best available answer (completeness: {completeness})")
+        logger.info(f"   📝 Returning best available answer ({completeness})")
         return self._clean_result(result)
     
+    def _select_from_maps(
+        self,
+        question: str,
+        q_type: str,
+        doc_chain: List[str],
+        documents: List[Dict],
+        target_article_num: Optional[str],
+        search_keywords: List[str],
+    ) -> List[Dict]:
+        """
+        Scan all document maps to find the most relevant articles.
+        Returns list of {doc_idx, article, sub_doc_type, filename}.
+        """
+        from app.services.document_mapper import find_relevant_articles_from_map
+        
+        candidates = []
+        
+        for doc_idx, doc in enumerate(documents):
+            doc_map = doc.get("document_map")
+            doc_type = (doc.get("document_type") or "UNKNOWN").upper()
+            filename = doc.get("filename", "unknown")
+            
+            if not doc_map:
+                continue
+            
+            for sub_doc in doc_map.get("sub_documents", []):
+                sub_type = (sub_doc.get("type") or "AUTRE").upper()
+                
+                for article in sub_doc.get("articles", []):
+                    art_num = str(article.get("number", ""))
+                    art_title = (article.get("title") or "").lower()
+                    art_summary = (article.get("summary") or "").lower()
+                    searchable = f"{art_title} {art_summary}"
+                    
+                    score = 0
+                    
+                    # Exact article number match = highest priority
+                    if target_article_num and art_num == target_article_num:
+                        score += 100
+                    
+                    # Keyword matching in title + summary
+                    for kw in search_keywords:
+                        if kw.lower() in searchable:
+                            score += 5
+                    
+                    # Bonus for documents in the priority chain
+                    if sub_type in doc_chain:
+                        chain_pos = doc_chain.index(sub_type)
+                        score += max(0, 10 - chain_pos * 2)
+                    elif doc_type in doc_chain:
+                        chain_pos = doc_chain.index(doc_type)
+                        score += max(0, 8 - chain_pos * 2)
+                    
+                    if score > 0:
+                        candidates.append({
+                            "doc_idx": doc_idx,
+                            "filename": filename,
+                            "doc_type": doc_type,
+                            "sub_doc_type": sub_type,
+                            "article": article,
+                            "score": score,
+                        })
+        
+        # Sort by score descending, take top 15
+        candidates.sort(key=lambda x: x["score"], reverse=True)
+        
+        for c in candidates[:10]:
+            art = c["article"]
+            logger.info(f"     → [{c['sub_doc_type']}] Art.{art.get('number')}: {art.get('title', '')[:40]} (score={c['score']})")
+        
+        return candidates[:15]
+    
+    def _build_map_context(
+        self,
+        selected_articles: List[Dict],
+        documents: List[Dict],
+        bordereau_metadata: Optional[Dict[str, Any]],
+        q_type: str,
+    ) -> Dict[str, Any]:
+        """Build context from map-selected articles by extracting their actual text."""
+        from app.services.document_mapper import get_article_content_from_map
+        
+        context_parts = []
+        total_chars = 0
+        MAX_CONTEXT = 50000
+        
+        # Always include bordereau for item-related questions
+        if bordereau_metadata and q_type in ("ITEM_GENERAL", "ITEM_TECHNICAL"):
+            bdx_text = self._format_bordereau_context(bordereau_metadata)
+            if bdx_text:
+                context_parts.append(bdx_text)
+                total_chars += len(bdx_text)
+                logger.info(f"   ✓ Bordereau context: {len(bdx_text)} chars")
+        
+        # Extract content for each selected article
+        used_keys = set()
+        for sel in selected_articles:
+            if total_chars >= MAX_CONTEXT:
+                break
+            
+            doc_idx = sel["doc_idx"]
+            doc = documents[doc_idx]
+            article = sel["article"]
+            art_num = str(article.get("number", ""))
+            filename = sel["filename"]
+            sub_type = sel["sub_doc_type"]
+            
+            key = f"{filename}:art{art_num}"
+            if key in used_keys:
+                continue
+            used_keys.add(key)
+            
+            # Try to get content from position data in map
+            start = article.get("_start")
+            end = article.get("_end")
+            raw_text = doc.get("raw_text", "")
+            
+            content = None
+            if start is not None and end is not None and raw_text:
+                content = raw_text[start:end].strip()
+            
+            # Fallback: try document_mapper helper
+            if not content and doc.get("document_map") and raw_text:
+                content = get_article_content_from_map(
+                    raw_text, doc["document_map"], art_num, sub_type
+                )
+            
+            # Last fallback: regex search
+            if not content and raw_text:
+                pattern = rf"(?i)article\s+(?:n[°o]?\s*)?{re.escape(art_num)}\s*[:\-–—.]?"
+                m = re.search(pattern, raw_text)
+                if m:
+                    content = raw_text[m.start():m.start() + 15000].strip()
+            
+            if content:
+                remaining = MAX_CONTEXT - total_chars
+                content = content[:remaining]
+                header = f"--- {sub_type} | Article {art_num}: {article.get('title', '')} ---"
+                chunk = f"{header}\n{content}"
+                context_parts.append(chunk)
+                total_chars += len(chunk)
+                logger.info(f"   ✓ [{sub_type}] Art.{art_num}: {len(content)} chars")
+        
+        # If we got very little from maps, add raw doc excerpts
+        if total_chars < 5000:
+            logger.info(f"   ⚠ Low targeted context ({total_chars} chars), adding raw excerpts")
+            for doc in documents:
+                if total_chars >= MAX_CONTEXT:
+                    break
+                raw = doc.get("raw_text", "")
+                if not raw:
+                    continue
+                dt = (doc.get("document_type") or "UNKNOWN").upper()
+                remaining = MAX_CONTEXT - total_chars
+                chars = min(len(raw), 15000, remaining)
+                chunk = f"=== DOCUMENT: {dt} — {doc.get('filename', 'unknown')} ===\n{raw[:chars]}"
+                context_parts.append(chunk)
+                total_chars += len(chunk)
+        
+        logger.info(f"   📊 Total context: {total_chars} chars from {len(context_parts)} sections")
+        
+        return {
+            "content": "\n\n".join(context_parts),
+            "_total_chars": total_chars,
+        }
+    
+    def _build_chunked_fallback(
+        self,
+        question: str,
+        q_type: str,
+        doc_chain: List[str],
+        documents: List[Dict],
+        bordereau_metadata: Optional[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """
+        Fallback: read full documents with chunking for long ones.
+        Prioritizes documents in the chain order.
+        """
+        context_parts = []
+        total_chars = 0
+        MAX_FALLBACK = 60000
+        CHUNK_SIZE = 20000
+        
+        # Include bordereau
+        if bordereau_metadata:
+            bdx_text = self._format_bordereau_context(bordereau_metadata)
+            if bdx_text:
+                context_parts.append(bdx_text)
+                total_chars += len(bdx_text)
+        
+        # Sort documents: chain priority first
+        def doc_priority(doc):
+            dt = (doc.get("document_type") or "UNKNOWN").upper()
+            if dt in doc_chain:
+                return doc_chain.index(dt)
+            return 99
+        
+        sorted_docs = sorted(documents, key=doc_priority)
+        
+        for doc in sorted_docs:
+            if total_chars >= MAX_FALLBACK:
+                break
+            raw = doc.get("raw_text", "")
+            if not raw:
+                continue
+            
+            dt = (doc.get("document_type") or "UNKNOWN").upper()
+            fname = doc.get("filename", "unknown")
+            remaining = MAX_FALLBACK - total_chars
+            
+            if len(raw) <= remaining:
+                chunk = f"=== DOCUMENT COMPLET: {dt} — {fname} ===\n{raw}"
+                context_parts.append(chunk)
+                total_chars += len(chunk)
+                logger.info(f"   ✓ [Fallback] {dt}/{fname}: FULL {len(raw)} chars")
+            else:
+                # Chunking with overlap
+                overlap = 500
+                chunk_idx = 0
+                offset = 0
+                while offset < len(raw) and total_chars < MAX_FALLBACK:
+                    chunk_idx += 1
+                    end = min(offset + CHUNK_SIZE, len(raw))
+                    chunk_content = raw[offset:end]
+                    chunk = f"=== DOCUMENT: {dt} — {fname} (partie {chunk_idx}) ===\n{chunk_content}"
+                    context_parts.append(chunk)
+                    total_chars += len(chunk)
+                    offset = end - overlap if end < len(raw) else end
+                    if total_chars >= MAX_FALLBACK:
+                        break
+                logger.info(f"   ✓ [Fallback] {dt}/{fname}: {chunk_idx} chunks")
+        
+        logger.info(f"   📊 Fallback context: {total_chars} chars")
+        return {
+            "content": "\n\n".join(context_parts),
+            "_total_chars": total_chars,
+        }
+    
     def _classify_question(self, question: str) -> tuple:
-        """
-        Classify question type and determine optimal document fallback chain.
-        """
+        """Classify question type and determine optimal document fallback chain."""
         q = question.lower()
         
-        # Item/product related → Bordereau first, then CPS for specs
         item_kw = ["article", "produit", "fourniture", "équipement", "matériel",
                     "quantité", "prix", "bordereau", "item", "désignation",
                     "المادة", "المواد", "الكمية"]
@@ -679,254 +927,25 @@ class AIService:
                 return "ITEM_TECHNICAL", ["BORDEREAU", "CPS", "ANNEXE", "RC"]
             return "ITEM_GENERAL", ["BORDEREAU", "CPS", "RC"]
         
-        # Technical/specs → CPS first
         specs_kw = ["spécification", "technique", "caractéristique", "norme",
                      "marque", "modèle", "dimension", "performance",
                      "المواصفات", "التقنية"]
         if any(k in q for k in specs_kw):
             return "TECHNICAL", ["CPS", "ANNEXE", "RC"]
         
-        # Legal/conditions → CPS then RC
         legal_kw = ["pénalité", "pénalités", "délai", "garantie", "caution",
                      "résiliation", "clause", "obligation", "assurance",
                      "retenue", "العقوبات", "الضمان", "الأجل"]
         if any(k in q for k in legal_kw):
             return "LEGAL", ["CPS", "RC", "ANNEXE"]
         
-        # Submission/admin → RC first
         admin_kw = ["soumission", "candidature", "dossier", "pli",
                      "pièce", "justificatif", "document requis", "المرشح",
                      "الملف", "العرض"]
         if any(k in q for k in admin_kw):
             return "ADMINISTRATIVE", ["RC", "CPS", "AVIS"]
         
-        # General → all docs
         return "GENERAL", ["CPS", "RC", "ANNEXE", "AVIS"]
-    
-    def _build_targeted_context(
-        self,
-        question: str,
-        q_type: str,
-        doc_chain: List[str],
-        documents: List[ExtractionResult],
-        bordereau_metadata: Optional[Dict[str, Any]]
-    ) -> Dict[str, Any]:
-        """
-        Build targeted context using indexed articles.
-        Selects only relevant articles based on question keywords.
-        """
-        from app.services.article_indexer import get_verified_articles, extract_article_content
-        
-        context_parts = []
-        docs_used = []
-        total_chars = 0
-        MAX_TARGETED = 40000
-        
-        # Always include bordereau for item-related questions
-        if bordereau_metadata and q_type in ("ITEM_GENERAL", "ITEM_TECHNICAL"):
-            bdx_text = self._format_bordereau_context(bordereau_metadata)
-            if bdx_text:
-                context_parts.append(bdx_text)
-                total_chars += len(bdx_text)
-                docs_used.append("BORDEREAU_STRUCTURED")
-                logger.info(f"   ✓ Bordereau context: {len(bdx_text)} chars")
-        
-        # Extract article-number reference from question (e.g., "article 26")
-        article_num_match = re.search(r"article\s*(?:n[°o]?\s*)?(\d+)", question.lower())
-        target_article_num = article_num_match.group(1) if article_num_match else None
-        
-        # Build keyword list for article matching
-        search_keywords = self._extract_search_keywords(question)
-        
-        # Sort documents by chain priority
-        doc_map = {}
-        for doc in documents:
-            dt = (doc.document_type.value if hasattr(doc.document_type, 'value') 
-                  else str(doc.document_type)).upper()
-            if dt not in doc_map:
-                doc_map[dt] = []
-            doc_map[dt].append(doc)
-        
-        for doc_type in doc_chain:
-            if total_chars >= MAX_TARGETED:
-                break
-            
-            type_docs = doc_map.get(doc_type, [])
-            for doc in type_docs:
-                if not doc.text or total_chars >= MAX_TARGETED:
-                    continue
-                
-                dt_label = (doc.document_type.value if hasattr(doc.document_type, 'value') 
-                           else str(doc.document_type)).upper()
-                
-                # Try indexed article selection first
-                articles = get_verified_articles(doc.text)
-                
-                if articles and (target_article_num or search_keywords):
-                    selected_content = []
-                    
-                    for art in articles:
-                        art_num = str(art.get("articleNumber", ""))
-                        art_title = (art.get("title") or "").lower()
-                        
-                        # Match by specific article number
-                        if target_article_num and art_num == target_article_num:
-                            content = extract_article_content(doc.text, art)
-                            selected_content.append(
-                                f"--- Article {art_num}: {art.get('title', '')} ---\n{content}"
-                            )
-                            continue
-                        
-                        # Match by keywords in title
-                        if search_keywords and any(kw in art_title for kw in search_keywords):
-                            content = extract_article_content(doc.text, art)
-                            selected_content.append(
-                                f"--- Article {art_num}: {art.get('title', '')} ---\n{content}"
-                            )
-                    
-                    if selected_content:
-                        doc_text = f"=== DOCUMENT: {dt_label} — {doc.filename} (articles sélectionnés) ===\n"
-                        doc_text += "\n\n".join(selected_content)
-                        remaining = MAX_TARGETED - total_chars
-                        doc_text = doc_text[:remaining]
-                        context_parts.append(doc_text)
-                        total_chars += len(doc_text)
-                        docs_used.append(f"{dt_label}/{doc.filename}")
-                        logger.info(f"   ✓ {dt_label}/{doc.filename}: {len(selected_content)} articles, {len(doc_text)} chars")
-                        continue
-                
-                # No article index or no match → use first portion of doc
-                remaining = MAX_TARGETED - total_chars
-                chars_to_use = min(len(doc.text), 15000, remaining)
-                doc_text = f"=== DOCUMENT: {dt_label} — {doc.filename} ===\n{doc.text[:chars_to_use]}"
-                context_parts.append(doc_text)
-                total_chars += len(doc_text)
-                docs_used.append(f"{dt_label}/{doc.filename}")
-                logger.info(f"   ✓ {dt_label}/{doc.filename}: {chars_to_use} chars (full scan)")
-        
-        # Add remaining docs not in chain (lower priority)
-        for doc in documents:
-            if total_chars >= MAX_TARGETED:
-                break
-            dt = (doc.document_type.value if hasattr(doc.document_type, 'value') 
-                  else str(doc.document_type)).upper()
-            doc_key = f"{dt}/{doc.filename}"
-            if doc_key in docs_used or not doc.text:
-                continue
-            
-            remaining = MAX_TARGETED - total_chars
-            chars_to_use = min(len(doc.text), 8000, remaining)
-            doc_text = f"=== DOCUMENT: {dt} — {doc.filename} ===\n{doc.text[:chars_to_use]}"
-            context_parts.append(doc_text)
-            total_chars += len(doc_text)
-            docs_used.append(doc_key)
-            logger.info(f"   ✓ {dt}/{doc.filename}: {chars_to_use} chars (supplementary)")
-        
-        logger.info(f"   📊 Targeted context: {total_chars} chars from {len(docs_used)} sources")
-        
-        return {
-            "content": "\n\n".join(context_parts),
-            "_docs_used": docs_used,
-            "_total_chars": total_chars
-        }
-    
-    def _build_fallback_context(
-        self,
-        question: str,
-        q_type: str,
-        doc_chain: List[str],
-        documents: List[ExtractionResult],
-        bordereau_metadata: Optional[Dict[str, Any]],
-        exclude_already_used: List[str] = None
-    ) -> Dict[str, Any]:
-        """
-        Fallback: read full documents with chunking for long ones.
-        Focuses on documents in the chain that weren't fully covered.
-        """
-        context_parts = []
-        total_chars = 0
-        MAX_FALLBACK = 60000
-        CHUNK_SIZE = 20000
-        
-        # Include bordereau if not already included
-        if bordereau_metadata and "BORDEREAU_STRUCTURED" not in (exclude_already_used or []):
-            bdx_text = self._format_bordereau_context(bordereau_metadata)
-            if bdx_text:
-                context_parts.append(bdx_text)
-                total_chars += len(bdx_text)
-        
-        # Sort documents by chain priority
-        doc_map = {}
-        for doc in documents:
-            dt = (doc.document_type.value if hasattr(doc.document_type, 'value') 
-                  else str(doc.document_type)).upper()
-            if dt not in doc_map:
-                doc_map[dt] = []
-            doc_map[dt].append(doc)
-        
-        # Process chain docs with full content + chunking
-        for doc_type in doc_chain:
-            if total_chars >= MAX_FALLBACK:
-                break
-            
-            for doc in doc_map.get(doc_type, []):
-                if not doc.text or total_chars >= MAX_FALLBACK:
-                    continue
-                
-                dt_label = (doc.document_type.value if hasattr(doc.document_type, 'value') 
-                           else str(doc.document_type)).upper()
-                
-                doc_text = doc.text
-                remaining = MAX_FALLBACK - total_chars
-                
-                if len(doc_text) <= remaining:
-                    chunk = f"=== DOCUMENT COMPLET: {dt_label} — {doc.filename} ===\n{doc_text}"
-                    context_parts.append(chunk)
-                    total_chars += len(chunk)
-                    logger.info(f"   ✓ [Fallback] {dt_label}/{doc.filename}: FULL {len(doc_text)} chars")
-                else:
-                    # Chunking: split into overlapping chunks
-                    overlap = 500
-                    chunk_idx = 0
-                    offset = 0
-                    while offset < len(doc_text) and total_chars < MAX_FALLBACK:
-                        chunk_idx += 1
-                        end = min(offset + CHUNK_SIZE, len(doc_text))
-                        chunk_content = doc_text[offset:end]
-                        
-                        chunk = f"=== DOCUMENT: {dt_label} — {doc.filename} (partie {chunk_idx}) ===\n{chunk_content}"
-                        context_parts.append(chunk)
-                        total_chars += len(chunk)
-                        
-                        offset = end - overlap if end < len(doc_text) else end
-                        
-                        if total_chars >= MAX_FALLBACK:
-                            break
-                    
-                    logger.info(f"   ✓ [Fallback] {dt_label}/{doc.filename}: {chunk_idx} chunks")
-        
-        # Add non-chain docs if space remains
-        used_types = set(doc_chain)
-        for doc in documents:
-            if total_chars >= MAX_FALLBACK:
-                break
-            dt = (doc.document_type.value if hasattr(doc.document_type, 'value') 
-                  else str(doc.document_type)).upper()
-            if dt in used_types or not doc.text:
-                continue
-            
-            remaining = MAX_FALLBACK - total_chars
-            chars = min(len(doc.text), 10000, remaining)
-            chunk = f"=== DOCUMENT: {dt} — {doc.filename} ===\n{doc.text[:chars]}"
-            context_parts.append(chunk)
-            total_chars += len(chunk)
-        
-        logger.info(f"   📊 Fallback context: {total_chars} chars")
-        
-        return {
-            "content": "\n\n".join(context_parts),
-            "_total_chars": total_chars
-        }
     
     def _extract_search_keywords(self, question: str) -> List[str]:
         """Extract meaningful keywords from question for article title matching."""
@@ -943,7 +962,6 @@ class AIService:
         words = re.findall(r'[a-zà-ÿ]{3,}', q)
         keywords = [w for w in words if w not in stop_words]
         
-        # Add compound phrases
         compound_phrases = [
             "caution définitive", "caution provisoire", "délai exécution",
             "délai livraison", "retenue garantie", "spécification technique",
@@ -1011,7 +1029,7 @@ class AIService:
         }
     
     def _clean_result(self, result: Dict[str, Any]) -> Dict[str, Any]:
-        """Clean result for API response (remove internal fields)."""
+        """Clean result for API response."""
         return {
             "answer": result.get("answer", ""),
             "citations": result.get("citations", []),
