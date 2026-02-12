@@ -77,28 +77,40 @@ Ta mission: identifier le document qui contient les SPÉCIFICATIONS TECHNIQUES /
 
 IMPORTANT - Comment identifier les pages:
 - Le texte fourni contient des marqueurs de page comme "[PAGE 1]", "--- Page 2 ---", ou des sauts de page
-- Cherche les sections intitulées "Spécifications techniques", "Caractéristiques techniques", "Prescriptions techniques", "Description technique"
+- Cherche les sections intitulées "Spécifications techniques", "Caractéristiques techniques", "Prescriptions techniques", "Description technique", "Cahier des clauses techniques"
 - Note les numéros de page de DÉBUT et FIN de ces sections
-- Si le document est un DOCX, les pages correspondent aux sections logiques
+- Pour les fichiers DOCX/DOC, les marqueurs de page peuvent être absents — repère les sections par leurs titres et estime les pages par la structure du contenu (sections, tableaux, paragraphes)
+- Si tu ne trouves PAS de marqueurs [PAGE X], analyse la structure du texte pour identifier les sections techniques et donne une estimation large (inclus plus de pages plutôt que moins)
 
 Les spécifications techniques se trouvent généralement dans:
-- Le CPS (Cahier des Prescriptions Spéciales)
-- Parfois dans des annexes techniques
+- Le CPS (Cahier des Prescriptions Spéciales) — cherche APRÈS les clauses administratives
+- Parfois dans des annexes techniques séparées
 
 Les spécifications techniques incluent:
-- Dimensions, poids, matériaux
-- Normes (NM, ISO, EN, etc.)
-- Caractéristiques de performance
+- Dimensions, poids, matériaux, compositions
+- Normes (NM, ISO, EN, CE, etc.)
+- Caractéristiques de performance et fonctionnalités
 - Descriptions détaillées des articles à fournir
-- Tableaux de caractéristiques
+- Tableaux de caractéristiques techniques
 
-⚠️ NE PAS confondre avec:
-- Le bordereau des prix (qui liste juste les articles/quantités/prix)
-- Les clauses administratives (garanties, pénalités, délais)
-- Les conditions de soumission
+⚠️⚠️⚠️ DISTINCTION CRITIQUE — Bordereau des prix vs Spécifications techniques:
+
+Le BORDEREAU DES PRIX contient:
+- Des colonnes: N° article, Désignation, Unité, Quantité, Prix unitaire, Prix total
+- Des montants en DH/MAD
+- C'est une LISTE COMPTABLE des articles avec leurs prix
+- Les désignations sont COURTES (1-2 lignes par article)
+
+Les SPÉCIFICATIONS TECHNIQUES contiennent:
+- Des DESCRIPTIONS DÉTAILLÉES de chaque article (paragraphes entiers)
+- Des EXIGENCES PRÉCISES: dimensions exactes, matériaux, normes à respecter
+- Des TABLEAUX DE CARACTÉRISTIQUES (sans colonnes de prix)
+- Parfois des SCHÉMAS ou références à des plans
+
+⚠️ ATTENTION: Parfois les spécifications techniques sont INTÉGRÉES dans le bordereau (chaque article est suivi de ses caractéristiques techniques dans la même section). Dans ce cas, identifie les pages du bordereau qui contiennent ces détails techniques.
 
 ⚠️ IMPORTANT: Ne donne PAS une seule page si les spécifications s'étendent sur plusieurs pages.
-Analyse le contenu et donne la plage COMPLÈTE.
+Analyse le contenu et donne la plage COMPLÈTE. En cas de doute, INCLUS PLUS de pages.
 
 Tu dois répondre en JSON:
 {
@@ -137,7 +149,9 @@ Voici les documents disponibles avec leur contenu:
 {all_summaries}
 
 Identifie le document et les pages exactes contenant les spécifications/caractéristiques techniques des articles.
-Analyse bien le contenu pour trouver les bonnes pages — ne devine pas, base-toi sur le texte fourni."""
+Analyse bien le contenu pour trouver les bonnes pages — ne devine pas, base-toi sur le texte fourni.
+RAPPEL: Ne confonds PAS le bordereau des prix (tableau avec prix) avec les spécifications techniques (descriptions détaillées, normes, dimensions).
+Si le document est un DOCX/DOC sans marqueurs de page clairs, estime la plage de pages en te basant sur la longueur du texte et la position des sections techniques."""
 
     response = ai_service._call_ai(system_prompt, user_prompt, max_tokens=1024)
     if not response:
@@ -181,25 +195,69 @@ Analyse bien le contenu pour trouver les bonnes pages — ne devine pas, base-to
 # Step 2 — DOCX → PDF conversion
 # ---------------------------------------------------------------------------
 
+def _find_libreoffice_path() -> Optional[str]:
+    """Find LibreOffice executable path, including Windows default install locations."""
+    # Try bare command first (works if it's in PATH)
+    for cmd in ["libreoffice", "soffice"]:
+        try:
+            result = subprocess.run([cmd, "--version"], capture_output=True, timeout=10)
+            if result.returncode == 0:
+                return cmd
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            continue
+
+    # Windows-specific paths
+    if sys.platform == "win32":
+        program_dirs = [
+            os.environ.get("PROGRAMFILES", r"C:\Program Files"),
+            os.environ.get("PROGRAMFILES(X86)", r"C:\Program Files (x86)"),
+            os.path.expanduser("~") + r"\AppData\Local\Programs",
+        ]
+        for prog_dir in program_dirs:
+            if not prog_dir:
+                continue
+            # Search for LibreOffice installations (any version)
+            lo_base = os.path.join(prog_dir, "LibreOffice")
+            if os.path.isdir(lo_base):
+                soffice = os.path.join(lo_base, "program", "soffice.exe")
+                if os.path.isfile(soffice):
+                    logger.info(f"Found LibreOffice at: {soffice}")
+                    return soffice
+            # Also check versioned folders like "LibreOffice 7"
+            try:
+                for entry in os.listdir(prog_dir):
+                    if entry.lower().startswith("libreoffice"):
+                        soffice = os.path.join(prog_dir, entry, "program", "soffice.exe")
+                        if os.path.isfile(soffice):
+                            logger.info(f"Found LibreOffice at: {soffice}")
+                            return soffice
+            except OSError:
+                continue
+
+    return None
+
+
 def _convert_docx_to_pdf(docx_bytes: bytes) -> Optional[bytes]:
     """
-    Convert a DOCX file to PDF using LibreOffice (headless).
-    Falls back to python-docx + reportlab if LibreOffice is not available.
+    Convert a DOCX/DOC file to PDF using LibreOffice (headless).
+    Falls back to PyMuPDF if LibreOffice is not available.
     """
-    # Try LibreOffice first (best quality)
-    try:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            docx_path = os.path.join(tmpdir, "input.docx")
-            with open(docx_path, "wb") as f:
-                f.write(docx_bytes)
+    lo_path = _find_libreoffice_path()
 
-            result = subprocess.run(
-                [
-                    "libreoffice", "--headless", "--convert-to", "pdf",
-                    "--outdir", tmpdir, docx_path,
-                ],
-                capture_output=True, timeout=60,
-            )
+    if lo_path:
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                docx_path = os.path.join(tmpdir, "input.docx")
+                with open(docx_path, "wb") as f:
+                    f.write(docx_bytes)
+
+                result = subprocess.run(
+                    [
+                        lo_path, "--headless", "--convert-to", "pdf",
+                        "--outdir", tmpdir, docx_path,
+                    ],
+                    capture_output=True, timeout=120,
+                )
 
             pdf_path = os.path.join(tmpdir, "input.pdf")
             if os.path.exists(pdf_path):
@@ -209,12 +267,12 @@ def _convert_docx_to_pdf(docx_bytes: bytes) -> Optional[bytes]:
                 return pdf_bytes
             else:
                 logger.warning(f"LibreOffice conversion produced no output: {result.stderr.decode()[:300]}")
-    except FileNotFoundError:
-        logger.warning("LibreOffice not found, trying fallback conversion")
-    except subprocess.TimeoutExpired:
-        logger.warning("LibreOffice conversion timed out")
-    except Exception as e:
-        logger.warning(f"LibreOffice conversion failed: {e}")
+        except subprocess.TimeoutExpired:
+            logger.warning("LibreOffice conversion timed out")
+        except Exception as e:
+            logger.warning(f"LibreOffice conversion failed: {e}")
+    else:
+        logger.warning("LibreOffice not found on system, trying fallback conversion")
 
     # Fallback: use pymupdf (fitz) to open DOCX if supported
     try:
