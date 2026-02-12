@@ -595,60 +595,65 @@ class AIService:
         """
         Phase 3: Answer questions about tender documents.
         
-        Optimized flow:
-        1. For item-related questions: use bordereau_metadata as PRIMARY source
-        2. For other questions: keyword-based article pre-filter → AI selection
-        3. Minimal context, fast response
+        Always uses ALL available resources as context so the AI never misses
+        information that exists in the documents.
         """
         if not question or not documents:
             return None
         
         logger.info(f"Ask AI: '{question[:50]}...'")
         
-        # Step 0: Check if question is item-related AND we have bordereau data
-        if bordereau_metadata and self._is_item_related_question(question):
-            logger.info("📦 Item-related question — using bordereau data as primary source")
-            return self._ask_ai_with_bordereau_context(
-                question, bordereau_metadata, documents, tender_reference
-            )
+        # Build full context from ALL documents
+        context_parts = []
         
-        # Step 1: Build article index
-        article_index = self._build_article_index_for_ask(documents)
+        # Include bordereau metadata if available (structured data)
+        if bordereau_metadata:
+            bdx = "=== BORDEREAU DES PRIX (données structurées) ===\n"
+            lots = bordereau_metadata.get("lots_articles", [])
+            for lot in lots:
+                lot_num = lot.get("numero_lot", lot.get("lot_numero", "Unique"))
+                lot_objet = lot.get("objet_lot", "")
+                articles = lot.get("articles", [])
+                bdx += f"--- Lot {lot_num}"
+                if lot_objet:
+                    bdx += f": {lot_objet}"
+                bdx += f" ({len(articles)} articles) ---\n"
+                for art in articles:
+                    num = art.get("numero_prix", "")
+                    desig = art.get("designation", art.get("description", ""))
+                    qty = art.get("quantite", "")
+                    unite = art.get("unite", "")
+                    line = f"  N°{num}: {desig}"
+                    if qty:
+                        line += f" | Qté: {qty}"
+                    if unite:
+                        line += f" {unite}"
+                    bdx += line + "\n"
+                bdx += "\n"
+            context_parts.append(bdx)
         
-        if not article_index:
-            logger.warning("No article index, using fallback")
-            return self._ask_ai_fallback(question, documents, tender_reference)
+        # Include ALL documents with generous limits
+        for doc in documents:
+            if doc.text:
+                doc_type = doc.document_type.value if hasattr(doc.document_type, 'value') else str(doc.document_type)
+                context_parts.append(f"=== {doc_type}: {doc.filename} ===\n{doc.text[:15000]}")
         
-        # Step 2: Fast keyword pre-filter first
-        selected_articles = self._keyword_filter_articles(question, article_index)
+        full_context = "\n\n".join(context_parts)
+        logger.info(f"📚 Using ALL resources: {len(context_parts)} sources, {len(full_context)} chars")
         
-        # Only call AI selector if keyword filter found nothing or too many
-        if len(selected_articles) == 0 or len(selected_articles) > 8:
-            logger.info(f"Keyword filter: {len(selected_articles)} articles, using AI selector")
-            selected_articles = self._select_articles_for_question(question, article_index)
-        else:
-            logger.info(f"Keyword filter: {len(selected_articles)} articles (skipping AI selector)")
-        
-        if not selected_articles:
-            selected_articles = self._get_default_articles(article_index)
-        
-        # Step 3: Build minimal context (reduced to 3000 chars per article)
-        context = self._build_context_from_selected_articles(
-            documents, selected_articles, max_chars_per_article=3000
-        )
-        
-        logger.info(f"Using {len(selected_articles)} articles, {len(context)} chars")
-        
-        # Step 4: Fast answer with minimal prompt
-        user_prompt = f"""REF: {tender_reference or '-'}
-Q: {question}
+        user_prompt = f"""RÉFÉRENCE: {tender_reference or 'N/A'}
 
-{context}"""
+QUESTION: {question}
+
+IMPORTANT: Cherchez la réponse dans TOUS les documents ci-dessous. La réponse peut se trouver dans n'importe quel document ou section.
+
+DOCUMENTS COMPLETS:
+{full_context[:50000]}"""
         
         response = self._call_ai(
             get_ask_ai_prompt(),
             user_prompt,
-            max_tokens=4096  # Allow long answers when truly needed
+            max_tokens=4096
         )
         
         if not response:
@@ -659,23 +664,12 @@ Q: {question}
                 "language": "fr"
             }
         
-        # Parse response
         result = self._parse_json_response(response)
         if result:
             result.setdefault("citations", [])
             result.setdefault("follow_up_questions", [])
             result.setdefault("language", "fr")
-            result["_articles_used"] = len(selected_articles)
-            
-            # Step 5: If AI couldn't answer from selected articles, fallback to ALL documents
-            if self._answer_indicates_uncertainty(result.get("answer", "")):
-                logger.info("⚠️ AI uncertain from selected articles — falling back to ALL documents")
-                fallback_result = self._ask_ai_fallback(question, documents, tender_reference)
-                if fallback_result and not self._answer_indicates_uncertainty(fallback_result.get("answer", "")):
-                    fallback_result["_source"] = "full_document_fallback"
-                    return fallback_result
-                logger.info("📭 Full-document fallback also couldn't find answer")
-            
+            result["_source"] = "all_resources"
             return result
         
         # Clean markdown if present
@@ -684,22 +678,12 @@ Q: {question}
             lines = clean_response.split("\n")
             clean_response = "\n".join(lines[1:-1]) if len(lines) > 2 else response
         
-        logger.warning("Ask AI returned non-JSON response, wrapping as plain text")
-        
-        # Also check plain text for uncertainty
-        if self._answer_indicates_uncertainty(clean_response):
-            logger.info("⚠️ AI uncertain (plain text) — falling back to ALL documents")
-            fallback_result = self._ask_ai_fallback(question, documents, tender_reference)
-            if fallback_result and not self._answer_indicates_uncertainty(fallback_result.get("answer", "")):
-                fallback_result["_source"] = "full_document_fallback"
-                return fallback_result
-        
         return {
             "answer": clean_response,
             "citations": [],
             "follow_up_questions": [],
             "language": "fr",
-            "_articles_used": len(selected_articles)
+            "_source": "all_resources"
         }
     
     @staticmethod
