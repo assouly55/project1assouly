@@ -1263,61 +1263,27 @@ def _check_for_ambiguity(question: str) -> Optional[dict]:
 
 def _try_metadata_answer(question: str, avis_metadata: dict, bordereau_metadata: Optional[dict] = None) -> Optional[dict]:
     """
-    Try to answer common questions directly from stored metadata.
-    Checks both avis_metadata AND bordereau_metadata for complete answers.
-    Returns None if the question requires full document analysis.
+    Try to answer SIMPLE factual questions directly from stored metadata.
+    Returns None for anything requiring document analysis (specs, details, conditions, etc.)
+    
+    IMPORTANT: This is a fast-path for trivial lookups only. When in doubt, return None
+    and let the full AI pipeline handle it with all documents.
     """
-    # Articles / Items / Quantities / Prix - Check bordereau_metadata FIRST
-    if any(kw in question for kw in ["articles", "quantité", "quantités", "prix", "items", "fournitures", 
-                                       "livrer", "produits", "désignation", "bordereau", "المواد", "الكميات"]):
-        if bordereau_metadata and bordereau_metadata.get("lots_articles"):
-            lots = bordereau_metadata.get("lots_articles", [])
-            total_articles = sum(len(lot.get("articles", [])) for lot in lots)
-            
-            if total_articles > 0:
-                # Build COMPLETE list of all articles
-                summary_lines = []
-                for lot in lots:  # Show ALL lots
-                    lot_num = lot.get("lot_numero", "Unique")
-                    lot_objet = lot.get("objet_lot", "")[:80]
-                    articles = lot.get("articles", [])
-                    
-                    if len(lots) > 1 or lot_objet:
-                        header = f"**Lot {lot_num}**"
-                        if lot_objet:
-                            header += f": {lot_objet}"
-                        summary_lines.append(header)
-                    
-                    for art in articles:  # Show ALL articles
-                        num_prix = art.get("numero_prix", "")
-                        designation = art.get("designation", "")[:80]
-                        qty = art.get("quantite", "")
-                        unite = art.get("unite", "")
-                        if designation:
-                            line = f"  - "
-                            if num_prix:
-                                line += f"**{num_prix}** - "
-                            line += designation
-                            if qty:
-                                line += f" | **Qté: {qty}**"
-                            if unite:
-                                line += f" {unite}"
-                            summary_lines.append(line)
-                
-                answer = f"**{total_articles} article(s)** au total"
-                if len(lots) > 1:
-                    answer += f" répartis sur **{len(lots)} lots**"
-                answer += ":\n\n" + "\n".join(summary_lines)
-                answer += "\n\n**[Bordereau des Prix]**"
-                
-                return {
-                    "answer": answer,
-                    "citations": [{"document": "BPU/DQE", "section": "Bordereau des Prix"}],
-                    "follow_up_questions": [
-                        "Quelles sont les spécifications techniques de ces articles?",
-                        "Quel est le délai de livraison prévu?"
-                    ]
-                }
+    # === NEVER shortcut if the question asks for details/specs/conditions ===
+    detail_signals = [
+        "spécification", "specification", "technique", "caractéristique",
+        "détail", "detail", "condition", "comment", "pourquoi", "expliquer",
+        "norme", "marque", "modèle", "critère", "exigence",
+        "pénalité", "penalite", "clause", "obligation",
+        "المواصفات", "التفاصيل", "الشروط",
+    ]
+    if any(kw in question for kw in detail_signals):
+        return None
+    
+    # === NEVER shortcut if asking about a SPECIFIC article number ===
+    import re
+    if re.search(r"article\s*\d+|article\s+n[°o]", question):
+        return None
     
     # Date limite
     if any(kw in question for kw in ["date limite", "deadline", "délai", "dernier délai", "متى", "آخر أجل"]):
@@ -1370,8 +1336,8 @@ def _try_metadata_answer(question: str, avis_metadata: dict, bordereau_metadata:
                     ]
                 }
     
-    # Objet du marché
-    if any(kw in question for kw in ["objet", "description", "quoi", "ماذا", "موضوع"]):
+    # Objet du marché (only for very simple "what is this about" questions)
+    if any(kw in question for kw in ["objet", "ماذا", "موضوع"]) and not any(kw in question for kw in ["lot", "article"]):
         objet = avis_metadata.get("objet_marche")
         if objet:
             val = objet.get("value") if isinstance(objet, dict) else objet

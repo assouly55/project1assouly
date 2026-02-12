@@ -582,7 +582,7 @@ class AIService:
         return self.extract_bordereau_items_smart(doc_dicts, existing_lots)
 
     # =========================================================================
-    # PHASE 3: Ask AI (Q&A)
+    # PHASE 3: Ask AI (Q&A) — Comprehensive All-Resources Approach
     # =========================================================================
     
     def ask_ai(
@@ -595,60 +595,65 @@ class AIService:
         """
         Phase 3: Answer questions about tender documents.
         
-        Always uses ALL available resources as context so the AI never misses
-        information that exists in the documents.
+        Strategy: Build the richest possible context from ALL sources, then let 
+        the AI cross-reference and find the answer.
+        
+        Context priority:
+        1. Bordereau structured data (items, quantities, units)
+        2. Full document texts ordered by relevance to question
+        3. All remaining documents
         """
         if not question or not documents:
             return None
         
-        logger.info(f"Ask AI: '{question[:50]}...'")
+        logger.info(f"🤖 Ask AI: '{question[:80]}...'")
+        logger.info(f"   📚 Available: {len(documents)} documents, bordereau={'yes' if bordereau_metadata else 'no'}")
         
-        # Build full context from ALL documents
+        # === Build comprehensive context ===
         context_parts = []
+        total_chars = 0
+        MAX_TOTAL_CONTEXT = 60000
+        MAX_PER_DOC = 20000
         
-        # Include bordereau metadata if available (structured data)
+        # 1. Bordereau structured data (always first — compact and high-value)
         if bordereau_metadata:
-            bdx = "=== BORDEREAU DES PRIX (données structurées) ===\n"
-            lots = bordereau_metadata.get("lots_articles", [])
-            for lot in lots:
-                lot_num = lot.get("numero_lot", lot.get("lot_numero", "Unique"))
-                lot_objet = lot.get("objet_lot", "")
-                articles = lot.get("articles", [])
-                bdx += f"--- Lot {lot_num}"
-                if lot_objet:
-                    bdx += f": {lot_objet}"
-                bdx += f" ({len(articles)} articles) ---\n"
-                for art in articles:
-                    num = art.get("numero_prix", "")
-                    desig = art.get("designation", art.get("description", ""))
-                    qty = art.get("quantite", "")
-                    unite = art.get("unite", "")
-                    line = f"  N°{num}: {desig}"
-                    if qty:
-                        line += f" | Qté: {qty}"
-                    if unite:
-                        line += f" {unite}"
-                    bdx += line + "\n"
-                bdx += "\n"
-            context_parts.append(bdx)
+            bdx_text = self._format_bordereau_context(bordereau_metadata)
+            if bdx_text:
+                context_parts.append(bdx_text)
+                total_chars += len(bdx_text)
+                logger.info(f"   ✓ Bordereau context: {len(bdx_text)} chars")
         
-        # Include ALL documents with generous limits
-        for doc in documents:
-            if doc.text:
-                doc_type = doc.document_type.value if hasattr(doc.document_type, 'value') else str(doc.document_type)
-                context_parts.append(f"=== {doc_type}: {doc.filename} ===\n{doc.text[:15000]}")
+        # 2. Prioritize documents likely relevant to the question
+        prioritized_docs = self._prioritize_docs_for_question(question, documents)
+        
+        for doc in prioritized_docs:
+            if not doc.text or total_chars >= MAX_TOTAL_CONTEXT:
+                continue
+            
+            doc_type = doc.document_type.value if hasattr(doc.document_type, 'value') else str(doc.document_type)
+            remaining = MAX_TOTAL_CONTEXT - total_chars
+            chars_to_use = min(len(doc.text), MAX_PER_DOC, remaining)
+            
+            doc_header = f"=== DOCUMENT: {doc_type} — {doc.filename} ==="
+            doc_content = doc.text[:chars_to_use]
+            
+            context_parts.append(f"{doc_header}\n{doc_content}")
+            total_chars += chars_to_use + len(doc_header)
+            logger.info(f"   ✓ {doc_type}/{doc.filename}: {chars_to_use} chars")
         
         full_context = "\n\n".join(context_parts)
-        logger.info(f"📚 Using ALL resources: {len(context_parts)} sources, {len(full_context)} chars")
+        logger.info(f"   📊 Total context: {len(full_context)} chars from {len(context_parts)} sources")
         
-        user_prompt = f"""RÉFÉRENCE: {tender_reference or 'N/A'}
+        # === Call AI with comprehensive context ===
+        user_prompt = f"""RÉFÉRENCE DU MARCHÉ: {tender_reference or 'N/A'}
 
-QUESTION: {question}
+QUESTION DE L'UTILISATEUR: {question}
 
-IMPORTANT: Cherchez la réponse dans TOUS les documents ci-dessous. La réponse peut se trouver dans n'importe quel document ou section.
+=== DÉBUT DES DOCUMENTS DU DOSSIER ===
 
-DOCUMENTS COMPLETS:
-{full_context[:50000]}"""
+{full_context}
+
+=== FIN DES DOCUMENTS ==="""
         
         response = self._call_ai(
             get_ask_ai_prompt(),
@@ -669,93 +674,38 @@ DOCUMENTS COMPLETS:
             result.setdefault("citations", [])
             result.setdefault("follow_up_questions", [])
             result.setdefault("language", "fr")
-            result["_source"] = "all_resources"
             return result
         
-        # Clean markdown if present
-        clean_response = response.strip()
-        if clean_response.startswith("```"):
-            lines = clean_response.split("\n")
-            clean_response = "\n".join(lines[1:-1]) if len(lines) > 2 else response
+        # Fallback: raw response as answer
+        clean = response.strip()
+        if clean.startswith("```"):
+            lines = clean.split("\n")
+            clean = "\n".join(lines[1:-1]) if len(lines) > 2 else clean
         
         return {
-            "answer": clean_response,
+            "answer": clean,
             "citations": [],
             "follow_up_questions": [],
-            "language": "fr",
-            "_source": "all_resources"
+            "language": "fr"
         }
     
-    @staticmethod
-    def _answer_indicates_uncertainty(answer: str) -> bool:
-        """Detect if the AI's answer indicates it couldn't find the information."""
-        if not answer:
-            return True
-        a = answer.lower()
-        uncertainty_phrases = [
-            "ne contient pas", "pas mentionné", "pas trouvé",
-            "aucune information", "pas d'information",
-            "ne figure pas", "ne mentionne pas",
-            "pas disponible", "n'est pas disponible",
-            "impossible de répondre", "je ne peux pas",
-            "documents fournis ne", "ne permettent pas",
-            "ne sont pas détaillé", "ne sont pas précisé",
-            "pas détaillé dans", "pas précisé dans",
-            "seules la désignation", "seules les",
-            "n'est pas spécifié", "non spécifié",
-            "n'apparaît pas", "n'apparaissent pas",
-            "pas de détail", "sans détail",
-            "information non disponible", "données insuffisantes",
-            "لا يحتوي", "لا توجد معلومات", "غير متوفر",
-            "not found", "not mentioned", "no information",
-            "cannot answer", "unable to find",
-            "not detailed", "not specified",
-        ]
-        return any(phrase in a for phrase in uncertainty_phrases)
-
-    @staticmethod
-    def _is_item_related_question(question: str) -> bool:
-        """Check if question is about items, quantities, prices (bordereau-related)."""
-        q = question.lower()
-        item_keywords = [
-            "article", "articles", "item", "items",
-            "quantité", "quantités", "quantite",
-            "prix", "montant", "coût", "cout",
-            "bordereau", "fourniture", "fournitures",
-            "produit", "produits", "livrer", "fournir",
-            "désignation", "designation",
-            "unité", "unite",
-            "lot", "lots",
-            "المواد", "الكميات", "الأسعار",
-            "combien", "liste",
-        ]
-        return any(kw in q for kw in item_keywords)
-    
-    def _ask_ai_with_bordereau_context(
-        self,
-        question: str,
-        bordereau_metadata: Dict[str, Any],
-        documents: List[ExtractionResult],
-        tender_reference: Optional[str]
-    ) -> Dict[str, Any]:
-        """
-        Answer item-related questions using bordereau data as PRIMARY source,
-        supplemented by document context for additional details.
-        """
-        # Build bordereau context (primary)
-        bordereau_context = "=== SOURCE PRIMAIRE: BORDEREAU DES PRIX ===\n"
-        bordereau_context += "(Ces données proviennent de l'extraction structurée du bordereau)\n\n"
-        
+    def _format_bordereau_context(self, bordereau_metadata: Dict[str, Any]) -> str:
+        """Format bordereau metadata as readable structured text."""
         lots = bordereau_metadata.get("lots_articles", [])
+        if not lots:
+            return ""
+        
+        lines = ["=== DOCUMENT: BORDEREAU DES PRIX (données structurées) ==="]
         for lot in lots:
             lot_num = lot.get("numero_lot", lot.get("lot_numero", "Unique"))
             lot_objet = lot.get("objet_lot", "")
             articles = lot.get("articles", [])
             
-            bordereau_context += f"--- Lot {lot_num}"
+            header = f"--- Lot {lot_num}"
             if lot_objet:
-                bordereau_context += f": {lot_objet}"
-            bordereau_context += f" ({len(articles)} articles) ---\n"
+                header += f": {lot_objet}"
+            header += f" ({len(articles)} articles) ---"
+            lines.append(header)
             
             for art in articles:
                 num = art.get("numero_prix", "")
@@ -763,306 +713,64 @@ DOCUMENTS COMPLETS:
                 qty = art.get("quantite", "")
                 unite = art.get("unite", "")
                 
-                line = f"  N°{num}: {desig}"
+                entry = f"  N°{num}: {desig}"
                 if qty:
-                    line += f" | Qté: {qty}"
+                    entry += f" | Qté: {qty}"
                 if unite:
-                    line += f" {unite}"
-                bordereau_context += line + "\n"
-            bordereau_context += "\n"
+                    entry += f" {unite}"
+                lines.append(entry)
+            lines.append("")
         
-        # Add supplementary document context (CPS specs for items)
-        supplementary = ""
-        for doc in documents:
-            if doc.text and doc.document_type in [
-                ExtractionResult.__class__,  # Just check if it's CPS
-            ]:
-                pass
-        
-        # Get CPS content for specifications
-        for doc in documents:
-            doc_type = doc.document_type.value if hasattr(doc.document_type, 'value') else str(doc.document_type)
-            if doc_type == "CPS" and doc.text:
-                supplementary += f"\n=== SOURCE COMPLÉMENTAIRE: CPS (spécifications) ===\n"
-                supplementary += doc.text[:8000]
-                break
-        
-        user_prompt = f"""REF: {tender_reference or '-'}
-Q: {question}
-
-{bordereau_context}
-{supplementary}"""
-        
-        response = self._call_ai(
-            get_ask_ai_prompt(),
-            user_prompt,
-            max_tokens=4096
-        )
-        
-        if not response:
-            return {
-                "answer": "Je n'ai pas pu traiter votre demande. Veuillez réessayer.",
-                "citations": [],
-                "follow_up_questions": [],
-                "language": "fr"
-            }
-        
-        result = self._parse_json_response(response)
-        if result:
-            result.setdefault("citations", [])
-            result.setdefault("follow_up_questions", [])
-            result.setdefault("language", "fr")
-            result["_source"] = "bordereau_primary"
-            
-            # If bordereau-focused answer is uncertain, fallback to ALL documents
-            if self._answer_indicates_uncertainty(result.get("answer", "")):
-                logger.info("⚠️ Bordereau context insufficient — falling back to ALL documents")
-                fallback_result = self._ask_ai_fallback(question, documents, tender_reference)
-                if fallback_result and not self._answer_indicates_uncertainty(fallback_result.get("answer", "")):
-                    fallback_result["_source"] = "full_document_fallback"
-                    return fallback_result
-            
-            return result
-        
-        return {
-            "answer": response.strip(),
-            "citations": [{"document": "Bordereau des Prix"}],
-            "follow_up_questions": [],
-            "language": "fr",
-            "_source": "bordereau_primary"
-        }
+        return "\n".join(lines)
     
-    def _build_article_index_for_ask(self, documents: List[ExtractionResult]) -> List[Dict]:
-        """Build a compact article index from all documents for quick selection."""
-        from app.services.article_indexer import get_verified_articles
+    def _prioritize_docs_for_question(
+        self, question: str, documents: List[ExtractionResult]
+    ) -> List[ExtractionResult]:
+        """
+        Order documents by likely relevance to the question.
+        CPS first for specs/technical, RC for rules, etc.
+        All documents are included — just ordered smartly.
+        """
+        q = question.lower()
         
-        article_index = []
-        
-        for doc in documents:
-            if not doc.text:
-                continue
-            
-            doc_type = doc.document_type.value if hasattr(doc.document_type, 'value') else str(doc.document_type)
-            articles = get_verified_articles(doc.text)
-            
-            for art in articles:
-                # Get preview (first 300 chars of article)
-                content = doc.text[art["startIndex"]:art["endIndex"]]
-                preview = content[:300].strip()
-                
-                article_index.append({
-                    "document": doc_type,
-                    "filename": doc.filename,
-                    "article_number": art["articleNumber"],
-                    "article_title": art["title"],
-                    "preview": preview,
-                    "start_index": art["startIndex"],
-                    "end_index": art["endIndex"],
-                })
-        
-        logger.info(f"Built article index with {len(article_index)} articles from {len(documents)} documents")
-        return article_index
-    
-    def _keyword_filter_articles(
-        self,
-        question: str,
-        article_index: List[Dict]
-    ) -> List[Dict]:
-        """Fast keyword-based article filtering - no AI call needed."""
-        # Common keyword mappings
-        KEYWORD_MAP = {
-            "pénalité": ["pénalité", "pénalités", "retard", "sanction"],
-            "penalite": ["pénalité", "pénalités", "retard", "sanction"],
-            "retard": ["retard", "pénalité", "délai"],
-            "caution": ["caution", "garantie", "cautionnement", "provisoire", "définitive"],
-            "garantie": ["garantie", "caution", "cautionnement"],
-            "paiement": ["paiement", "règlement", "décompte", "facture", "acompte"],
-            "délai": ["délai", "exécution", "livraison", "durée"],
-            "document": ["document", "pièce", "dossier", "justificatif"],
-            "prix": ["prix", "bordereau", "montant", "estimation", "unitaire"],
-            "objet": ["objet", "description", "spécification", "prestation"],
-            "réception": ["réception", "livraison", "provisoire", "définitive"],
-            "résiliation": ["résiliation", "rupture", "annulation"],
-            "modification": ["modification", "avenant", "changement"],
-            "assurance": ["assurance", "responsabilité", "risque"],
-            "sous-traitance": ["sous-traitance", "sous-traitant"],
-        }
-        
-        # Extract keywords from question
-        q_lower = question.lower()
-        search_terms = set()
-        
-        for key, terms in KEYWORD_MAP.items():
-            if key in q_lower:
-                search_terms.update(terms)
-        
-        # Also add raw words from question (>3 chars)
-        for word in re.findall(r'\b\w{4,}\b', q_lower):
-            search_terms.add(word)
-        
-        if not search_terms:
-            return []
-        
-        # Score articles by keyword matches
-        scored = []
-        for art in article_index:
-            title_lower = art["article_title"].lower()
-            preview_lower = art["preview"].lower()
-            
+        def doc_score(doc: ExtractionResult) -> int:
+            dt = (doc.document_type.value if hasattr(doc.document_type, 'value') 
+                  else str(doc.document_type)).upper()
             score = 0
-            for term in search_terms:
-                if term in title_lower:
-                    score += 3  # Title match is more important
-                if term in preview_lower:
-                    score += 1
             
-            if score > 0:
-                scored.append((score, art))
-        
-        # Sort by score, return top 5
-        scored.sort(key=lambda x: -x[0])
-        return [art for _, art in scored[:5]]
-    
-    def _select_articles_for_question(
-        self, 
-        question: str, 
-        article_index: List[Dict]
-    ) -> List[Dict]:
-        """AI-based article selection (used as fallback)."""
-        
-        # Compact index - minimal data
-        compact_index = [
-            f"{art['document']}|{art['article_number']}|{art['article_title']}"
-            for art in article_index
-        ]
-        
-        user_prompt = f"Q: {question}\n\nARTICLES:\n" + "\n".join(compact_index[:50])
-        
-        response = self._call_ai(
-            get_ask_ai_selector_prompt(),
-            user_prompt,
-            max_tokens=512  # Reduced
-        )
-        
-        if not response:
-            return []
-        
-        result = self._parse_json_response(response)
-        if not result or "selected_articles" not in result:
-            return []
-        
-        # Map back to full info
-        selected = []
-        for sel in result.get("selected_articles", [])[:5]:
-            for art in article_index:
-                if (art["article_number"] == sel.get("article_number") and 
-                    art["document"] == sel.get("document")):
-                    selected.append(art)
-                    break
-        
-        return selected
-    
-    def _get_default_articles(self, article_index: List[Dict]) -> List[Dict]:
-        """Get first 3 articles from each document type as fallback."""
-        by_doc = {}
-        for art in article_index:
-            doc = art["document"]
-            if doc not in by_doc:
-                by_doc[doc] = []
-            if len(by_doc[doc]) < 3:
-                by_doc[doc].append(art)
-        
-        result = []
-        for articles in by_doc.values():
-            result.extend(articles)
-        return result[:10]  # Max 10 total
-    
-    def _build_context_from_selected_articles(
-        self,
-        documents: List[ExtractionResult],
-        selected_articles: List[Dict],
-        max_chars_per_article: int = 8000
-    ) -> str:
-        """Build focused context from selected articles only."""
-        context_parts = []
-        
-        # Create doc lookup
-        doc_lookup = {doc.filename: doc for doc in documents}
-        
-        for art in selected_articles:
-            doc = doc_lookup.get(art["filename"])
-            if not doc or not doc.text:
-                continue
+            specs_kw = ["spécification", "technique", "caractéristique", "norme", 
+                        "marque", "modèle", "détail", "specification"]
+            rules_kw = ["pénalité", "délai", "condition", "clause", "obligation",
+                        "résiliation", "garantie", "assurance"]
+            items_kw = ["article", "quantité", "prix", "bordereau", "fourniture",
+                        "produit", "désignation"]
+            submit_kw = ["document", "soumission", "candidature", "pli", "dossier",
+                         "pièce", "justificatif"]
             
-            # Extract article content
-            start = art.get("start_index", 0)
-            end = art.get("end_index", len(doc.text))
-            content = doc.text[start:end][:max_chars_per_article]
+            if dt == "CPS":
+                score += 10
+                if any(k in q for k in specs_kw):
+                    score += 20
+                if any(k in q for k in rules_kw):
+                    score += 15
+            elif dt == "RC":
+                score += 5
+                if any(k in q for k in submit_kw):
+                    score += 20
+                if any(k in q for k in rules_kw):
+                    score += 10
+            elif dt in ("BPDE", "BPU", "DQE", "BORDEREAU"):
+                if any(k in q for k in items_kw):
+                    score += 20
+            elif dt == "AVIS":
+                score += 3
             
-            context_parts.append(
-                f"=== {art['document']}: Article {art['article_number']} - {art['article_title']} ===\n{content}"
-            )
-        
-        return "\n\n".join(context_parts)
-    
-    def _ask_ai_fallback(
-        self,
-        question: str,
-        documents: List[ExtractionResult],
-        tender_reference: Optional[str]
-    ) -> Dict[str, Any]:
-        """
-        Full-document fallback: search ALL documents with generous content limits.
-        Used when article-based or bordereau-based answers indicate uncertainty.
-        """
-        logger.info(f"🔍 Full-document fallback: searching {len(documents)} documents")
-        context_parts = []
-        for doc in documents:
             if doc.text:
-                doc_type = doc.document_type.value if hasattr(doc.document_type, 'value') else str(doc.document_type)
-                # Use generous limits — up to 15000 chars per doc
-                context_parts.append(f"=== {doc_type}: {doc.filename} ===\n{doc.text[:15000]}")
+                score += min(len(doc.text) // 5000, 5)
+            
+            return score
         
-        full_context = "\n\n".join(context_parts)
-        logger.info(f"   Full context: {len(full_context)} chars from {len(context_parts)} documents")
-        
-        user_prompt = f"""RÉFÉRENCE: {tender_reference or 'N/A'}
-
-QUESTION: {question}
-
-IMPORTANT: Cherchez la réponse dans TOUS les documents ci-dessous. La réponse peut se trouver dans n'importe quel document ou section.
-
-DOCUMENTS COMPLETS:
-{full_context[:50000]}
-"""
-        
-        response = self._call_ai(
-            get_ask_ai_prompt(),
-            user_prompt,
-            max_tokens=4096
-        )
-        
-        if not response:
-            return {
-                "answer": "Je n'ai pas pu traiter votre demande. Veuillez réessayer.",
-                "citations": [],
-                "follow_up_questions": [],
-                "language": "fr"
-            }
-        
-        result = self._parse_json_response(response)
-        if result:
-            result.setdefault("citations", [])
-            result.setdefault("follow_up_questions", [])
-            result.setdefault("language", "fr")
-            return result
-        
-        return {
-            "answer": response,
-            "citations": [],
-            "follow_up_questions": [],
-            "language": "fr"
-        }
+        return sorted(documents, key=doc_score, reverse=True)
 
     # =========================================================================
     # PHASE 4: Category Classification
