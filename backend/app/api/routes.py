@@ -343,7 +343,6 @@ async def _process_single_tender(
                             file_size_bytes=doc.file_size_bytes,
                             mime_type=doc.mime_type,
                             article_index=doc.article_index,
-                            document_map=doc.document_map,
                         )
                         db.add(db_doc)
                         
@@ -352,8 +351,7 @@ async def _process_single_tender(
                             "filename": doc.filename,
                             "document_type": _doc_type_str(doc.document_type),
                             "raw_text": doc.raw_text,
-                            "article_index": doc.article_index,
-                            "document_map": doc.document_map,
+                            "article_index": doc.article_index
                         })
                 
                 # If early extraction failed, try with all documents
@@ -885,8 +883,6 @@ def get_tender(tender_id: str, db: Session = Depends(get_db)):
             "file_size_bytes": doc.file_size_bytes,
             "has_article_index": doc.article_index is not None,
             "article_count": len(doc.article_index) if doc.article_index else 0,
-            "has_document_map": doc.document_map is not None,
-            "document_map": doc.document_map,
         }
         for doc in tender.documents
     ]
@@ -1112,7 +1108,6 @@ async def _redownload_tender_documents_async(tender: Tender, db: Session) -> Lis
                             file_size_bytes=doc.file_size_bytes,
                             mime_type=doc.mime_type,
                             article_index=doc.article_index,
-                            document_map=doc.document_map,
                         )
                         db.add(db_doc)
                         stored_documents.append(db_doc)
@@ -1182,20 +1177,22 @@ def ask_ai_about_tender(
     if not documents:
         raise HTTPException(400, "No documents available")
     
-    # Build document info dicts with maps for Ask AI
-    doc_infos = []
+    extraction_results = []
     for doc in documents:
-        doc_infos.append({
-            "filename": doc.filename,
-            "document_type": doc.document_type or "UNKNOWN",
-            "raw_text": doc.raw_text or "",
-            "document_map": doc.document_map,
-            "article_index": doc.article_index,
-        })
+        extraction_results.append(ExtractionResult(
+            filename=doc.filename,
+            document_type=_to_extractor_doc_type(doc.document_type),
+            text=doc.raw_text or "",
+            page_count=doc.page_count,
+            extraction_method=ExtractionMethod(doc.extraction_method) if doc.extraction_method else ExtractionMethod.DIGITAL,
+            file_size_bytes=doc.file_size_bytes or 0,
+            mime_type=doc.mime_type or "",
+            success=True
+        ))
     
     result = ai_service.ask_ai(
         request.question, 
-        doc_infos,
+        extraction_results,
         tender_reference=tender.external_reference,
         bordereau_metadata=tender.bordereau_metadata
     )

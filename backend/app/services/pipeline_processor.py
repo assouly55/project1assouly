@@ -30,7 +30,6 @@ from app.services.article_indexer import (
     build_article_index_for_db,
     slice_document_by_articles,
 )
-from app.services.document_mapper import build_document_map
 from app.services.file_detector import detect_and_prioritize_files
 
 
@@ -44,8 +43,7 @@ class ProcessedDocument:
     extraction_method: ExtractionMethod
     file_size_bytes: int
     mime_type: str
-    article_index: Optional[List[Dict]] = None  # For CPS/RC (legacy regex)
-    document_map: Optional[Dict] = None  # AI-powered hierarchical tree map
+    article_index: Optional[List[Dict]] = None  # For CPS/RC
     success: bool = True
     error: Optional[str] = None
 
@@ -234,34 +232,13 @@ def process_single_document(
                 error=extraction.error
             )
         
-        # Build article index for CPS and RC documents (legacy regex-based)
+        # Build article index for CPS and RC documents
         article_index = None
         if extraction.document_type in [DocumentType.CPS, DocumentType.RC]:
             articles = get_verified_articles(extraction.text)
             if articles:
                 article_index = articles
                 logger.info(f"Indexed {len(articles)} articles from {filename}")
-        
-        # AI-powered document mapping for ALL document types with sufficient text
-        document_map = None
-        doc_type_str = extraction.document_type.value if hasattr(extraction.document_type, 'value') else str(extraction.document_type)
-        if extraction.text and len(extraction.text) > 200:
-            try:
-                from openai import OpenAI
-                from app.core.config import settings
-                ai_client = OpenAI(
-                    api_key=settings.DEEPSEEK_API_KEY,
-                    base_url=settings.DEEPSEEK_BASE_URL,
-                )
-                document_map = build_document_map(
-                    ai_client=ai_client,
-                    model=settings.DEEPSEEK_MODEL,
-                    text=extraction.text,
-                    filename=filename,
-                    document_type=doc_type_str,
-                )
-            except Exception as e:
-                logger.warning(f"Document mapping failed for {filename}: {e}")
         
         return ProcessedDocument(
             filename=filename,
@@ -272,7 +249,6 @@ def process_single_document(
             file_size_bytes=extraction.file_size_bytes,
             mime_type=extraction.mime_type,
             article_index=article_index,
-            document_map=document_map,
             success=True
         )
         

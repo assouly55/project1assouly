@@ -131,13 +131,9 @@ class TenderDocument(Base):
     raw_text = Column(Text, nullable=True)
     page_count = Column(Integer, nullable=True)
     
-    # Article index for this specific document (CPS/RC only - legacy regex)
+    # Article index for this specific document (CPS/RC only)
     # Structure: [{"articleNumber": "1", "title": "...", "startIndex": 0, "endIndex": 100}, ...]
     article_index = Column(JSONB, nullable=True)
-    
-    # AI-powered document map (hierarchical tree structure)
-    # Structure: {"document_title": "...", "sub_documents": [...], "total_articles": N}
-    document_map = Column(JSONB, nullable=True)
     
     # Extraction method used
     extraction_method = Column(Enum(ExtractionMethod), nullable=True)
