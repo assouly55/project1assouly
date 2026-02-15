@@ -73,6 +73,7 @@ class ExtractionResult:
     mime_type: str
     success: bool
     error: Optional[str] = None
+    bordereau_found: bool = False
 
 
 # Classification keywords for document type detection
@@ -678,19 +679,12 @@ def _extract_full_pdf_digital(file_bytes: io.BytesIO) -> Tuple[str, int]:
     return "\n\n".join(text_parts), page_count
 
 
-def _extract_full_pdf_ocr(file_bytes: io.BytesIO) -> Tuple[str, int]:
+def _extract_full_pdf_ocr(file_bytes: io.BytesIO, skip_bordereau_reocr: bool = False) -> Tuple[str, int, bool]:
     """
-    Full OCR extraction from scanned PDF — two-step pipeline:
+    Full OCR extraction from scanned PDF — two-step pipeline.
     
-    Step 1: Fast plain-text OCR of all pages via Tesseract.
-            This text is kept for indexing and general use.
-    Step 2: Detect bordereau pages from the OCR text, then re-process
-            only those pages with Azure Document Intelligence for
-            high-fidelity table extraction. Azure output replaces
-            the plain text for those pages, giving the AI structured
-            column data for item extraction.
-            Falls back to coordinate-based table OCR if Azure DI
-            is not configured.
+    Returns:
+        Tuple of (text, page_count, bordereau_found)
     """
     try:
         from app.services.tesseract_ocr import ocr_full_pdf_tesseract_parallel
@@ -699,9 +693,13 @@ def _extract_full_pdf_ocr(file_bytes: io.BytesIO) -> Tuple[str, int]:
         text, page_count = ocr_full_pdf_tesseract_parallel(file_bytes)
         
         if not text or "[OCR FAILED" in text:
-            return text, page_count
+            return text, page_count, False
         
         # Step 2: Detect bordereau pages → re-process with Azure DI (or fallback)
+        if skip_bordereau_reocr:
+            logger.info("⏭ Skipping bordereau re-OCR (already found in previous file)")
+            return text, page_count, False
+        
         try:
             from app.core.config import settings
             
@@ -715,7 +713,7 @@ def _extract_full_pdf_ocr(file_bytes: io.BytesIO) -> Tuple[str, int]:
                 if enhanced_text != text:
                     logger.info("✅ Bordereau pages enhanced with Azure Document Intelligence")
                 
-                return enhanced_text, page_count
+                return enhanced_text, page_count, bordereau_found
             else:
                 # Fallback: coordinate-based table OCR (Tesseract + OpenCV)
                 logger.info("Azure DI not configured, using coordinate-based table OCR fallback")
@@ -727,18 +725,18 @@ def _extract_full_pdf_ocr(file_bytes: io.BytesIO) -> Tuple[str, int]:
                 if enhanced_text != text:
                     logger.info("✅ Bordereau pages enhanced with coordinate-based table OCR")
                 
-                return enhanced_text, page_count
+                return enhanced_text, page_count, False
                 
         except ImportError as e:
             logger.warning(f"Table enhancement not available: {e}")
-            return text, page_count
+            return text, page_count, False
         except Exception as e:
             logger.warning(f"Table enhancement failed, using Tesseract: {e}")
-            return text, page_count
+            return text, page_count, False
         
     except Exception as e:
         logger.error(f"Full OCR failed: {e}")
-        return f"[OCR FAILED: {str(e)}]", 0
+        return f"[OCR FAILED: {str(e)}]", 0, False
 
 
 
@@ -791,10 +789,13 @@ def _extract_full_xlsx(file_bytes: io.BytesIO) -> Tuple[str, int]:
             return f"[EXCEL EXTRACTION FAILED: {e}]", None
 
 
-def extract_full_document(filename: str, file_bytes: io.BytesIO, is_scanned: bool = False) -> ExtractionResult:
+def extract_full_document(filename: str, file_bytes: io.BytesIO, is_scanned: bool = False, skip_bordereau_reocr: bool = False) -> ExtractionResult:
     """
     Full extraction of a single document.
     Use appropriate method based on is_scanned flag.
+    
+    Args:
+        skip_bordereau_reocr: If True, skip Azure DI bordereau re-OCR (already found in another file)
     """
     file_bytes.seek(0, 2)
     file_size = file_bytes.tell()
@@ -812,10 +813,11 @@ def extract_full_document(filename: str, file_bytes: io.BytesIO, is_scanned: boo
     }
     mime_type = mime_map.get(ext, 'application/octet-stream')
     
+    bordereau_found = False
     try:
         if ext == 'pdf' or mime_type == 'application/pdf':
             if is_scanned:
-                text, page_count = _extract_full_pdf_ocr(file_bytes)
+                text, page_count, bordereau_found = _extract_full_pdf_ocr(file_bytes, skip_bordereau_reocr)
                 method = ExtractionMethod.OCR
             else:
                 text, page_count = _extract_full_pdf_digital(file_bytes)
@@ -862,7 +864,8 @@ def extract_full_document(filename: str, file_bytes: io.BytesIO, is_scanned: boo
             extraction_method=method,
             file_size_bytes=file_size,
             mime_type=mime_type,
-            success=True
+            success=True,
+            bordereau_found=bordereau_found,
         )
         
     except Exception as e:
