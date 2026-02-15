@@ -417,9 +417,12 @@ class AIService:
         Includes smart pre-check to skip documents that don't contain a Bordereau.
         Files already classified as BPDE always go through (they ARE the bordereau).
         """
-        # Always process files classified as BPDE (bordereau) — skip indicator check
+        # Always process files classified as BPDE (bordereau) or CPS — skip indicator check
+        # CPS always contains the bordereau (usually in the last pages)
+        # For scanned/OCR'd documents, keyword indicators may be missing
         is_bpde = source_type.upper() in ("BPDE", "BORDEREAU")
-        if not is_bpde and not self._has_bordereau_indicators(content):
+        is_cps = source_type.upper() == "CPS" or "cps" in source_name.lower()
+        if not is_bpde and not is_cps and not self._has_bordereau_indicators(content):
             logger.info(f"   ⏭ Skipping {source_name}: No Bordereau indicators found")
             return None
         

@@ -373,6 +373,10 @@ def reocr_bordereau_pages_azure(
     page ranges), then sends only those to Azure DI for high-fidelity
     extraction.
 
+    IMPORTANT: If AI detection fails to find any bordereau pages, we
+    force the last N pages of the document since bordereaux are ALWAYS
+    at the end of CPS documents. Every tender must have a bordereau.
+
     Falls back to the original text if Azure DI is not configured or fails.
     """
 
@@ -381,9 +385,23 @@ def reocr_bordereau_pages_azure(
     else:
         bordereau_pages = _ai_detect_bordereau_pages(original_text)
 
+    # FALLBACK: If AI found no bordereau pages, force the last pages
+    # Every tender MUST have a bordereau — it's typically at the END of the CPS
     if not bordereau_pages:
-        logger.info("No bordereau pages detected, keeping original OCR")
-        return original_text
+        # Count total pages from the OCR text markers
+        page_numbers_in_text = re.findall(r'---\s*Page\s+(\d+)\s*---', original_text)
+        if page_numbers_in_text:
+            total_pages = max(int(p) for p in page_numbers_in_text)
+            # Take the last 10 pages (or all if fewer)
+            force_start = max(1, total_pages - 9)
+            bordereau_pages = list(range(force_start, total_pages + 1))
+            logger.warning(
+                f"⚠ AI found no bordereau pages — forcing last {len(bordereau_pages)} "
+                f"pages ({force_start}-{total_pages}) for Azure DI extraction"
+            )
+        else:
+            logger.info("No bordereau pages detected and no page markers found, keeping original OCR")
+            return original_text
 
     # Limit pages
     MAX_PAGES = 15
