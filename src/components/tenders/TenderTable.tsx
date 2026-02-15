@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
-import { ExternalLink, FileText, ChevronRight, ChevronDown, ChevronUp, FlaskConical } from 'lucide-react';
+import { ExternalLink, FileText, ChevronRight, ChevronDown, ChevronUp, FlaskConical, Clock, Percent, Award, Shield } from 'lucide-react';
 import {
   Table,
   TableBody,
@@ -11,7 +11,7 @@ import {
 } from '@/components/ui/table';
 import { StatusBadge } from '@/components/dashboard/StatusBadge';
 import { Badge } from '@/components/ui/badge';
-import type { Tender, AvisMetadata } from '@/types/tender';
+import type { Tender, AvisMetadata, ContractDetails } from '@/types/tender';
 
 interface TenderTableProps {
   tenders: Tender[];
@@ -59,7 +59,7 @@ function MetadataField({ label, value }: { label: string; value: string | null |
   );
 }
 
-function AvisMetadataDetails({ rawMetadata }: { rawMetadata: any }) {
+function AvisMetadataDetails({ rawMetadata, contractDetails }: { rawMetadata: any; contractDetails?: ContractDetails | null }) {
   const metadata = normalizeAvisMetadata(rawMetadata);
   
   if (!metadata) {
@@ -144,6 +144,63 @@ function AvisMetadataDetails({ rawMetadata }: { rawMetadata: any }) {
                 </div>
               );
             })}
+          </div>
+        </div>
+      )}
+      {/* Contract Details */}
+      {contractDetails && (
+        <div className="border-t border-border pt-4">
+          <span className="text-xs text-muted-foreground uppercase tracking-wide block mb-2">
+            Détails Contractuels
+          </span>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            {contractDetails.delai_execution && (
+              <div className="flex items-center gap-2 text-sm">
+                <Clock className="w-3.5 h-3.5 text-primary flex-shrink-0" />
+                <div>
+                  <span className="text-xs text-muted-foreground block">Délai</span>
+                  <span>{contractDetails.delai_execution}</span>
+                </div>
+              </div>
+            )}
+            {contractDetails.penalite_retard && (
+              <div className="flex items-center gap-2 text-sm">
+                <Percent className="w-3.5 h-3.5 text-warning flex-shrink-0" />
+                <div>
+                  <span className="text-xs text-muted-foreground block">Pénalité</span>
+                  <span>
+                    {typeof contractDetails.penalite_retard === 'string'
+                      ? contractDetails.penalite_retard
+                      : contractDetails.penalite_retard.taux}
+                  </span>
+                </div>
+              </div>
+            )}
+            {contractDetails.mode_attribution && (
+              <div className="flex items-center gap-2 text-sm">
+                <Award className="w-3.5 h-3.5 text-success flex-shrink-0" />
+                <div>
+                  <span className="text-xs text-muted-foreground block">Attribution</span>
+                  <span>{contractDetails.mode_attribution}</span>
+                </div>
+              </div>
+            )}
+            {contractDetails.caution_definitive && (
+              <div className="flex items-center gap-2 text-sm">
+                <Shield className="w-3.5 h-3.5 text-primary flex-shrink-0" />
+                <div>
+                  <span className="text-xs text-muted-foreground block">Caution Déf.</span>
+                  <span>
+                    {typeof contractDetails.caution_definitive === 'string'
+                      ? contractDetails.caution_definitive
+                      : contractDetails.caution_definitive.taux}
+                  </span>
+                  {typeof contractDetails.caution_definitive === 'object' && contractDetails.caution_definitive.montant_estime && (
+                    <span className="text-xs text-primary block font-mono">≈ {contractDetails.caution_definitive.montant_estime}</span>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -290,7 +347,7 @@ export function TenderTable({ tenders, isLoading }: TenderTableProps) {
                 {isExpanded && (
                   <TableRow key={`${tender.id}-details`} className="hover:bg-transparent">
                     <TableCell colSpan={7} className="p-0">
-                      <AvisMetadataDetails rawMetadata={tender.avis_metadata} />
+                      <AvisMetadataDetails rawMetadata={tender.avis_metadata} contractDetails={tender.contract_details} />
                     </TableCell>
                   </TableRow>
                 )}

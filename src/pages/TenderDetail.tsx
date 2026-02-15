@@ -1,6 +1,6 @@
 import { useParams, Link, useSearchParams } from 'react-router-dom';
 import { useEffect, useState, useMemo } from 'react';
-import { ArrowLeft, ExternalLink, Bot, FileText, RefreshCw, Loader2, CheckCircle2, AlertCircle, User, Mail, Phone, Building2, Tag, MessageSquare, FileSearch } from 'lucide-react';
+import { ArrowLeft, ExternalLink, Bot, FileText, RefreshCw, Loader2, CheckCircle2, AlertCircle, User, Mail, Phone, Building2, Tag, MessageSquare, FileSearch, Download, Archive, Clock, Percent, Award, Shield } from 'lucide-react';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { StatusBadge } from '@/components/dashboard/StatusBadge';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
@@ -10,7 +10,7 @@ import { Progress } from '@/components/ui/progress';
 import { api } from '@/lib/api';
 import { AskAIChat } from '@/components/tenders/AskAIChat';
 import { TechnicalPagesViewer } from '@/components/tenders/TechnicalPagesViewer';
-import type { Tender, TenderLot, BordereauItem, LotArticles, AvisMetadata, BordereauMetadata, TenderCategory } from '@/types/tender';
+import type { Tender, TenderLot, BordereauItem, LotArticles, AvisMetadata, BordereauMetadata, TenderCategory, ContractDetails } from '@/types/tender';
 
 // Merged lot with both avis and bordereau items
 interface MergedLot extends TenderLot {
@@ -641,6 +641,78 @@ export default function TenderDetail() {
                 <CategoryPath categories={tender.categories} />
               </div>
             )}
+
+            {/* Contract Details */}
+            {tender?.contract_details && (
+              <div className="data-card">
+                <h3 className="font-medium mb-4">Détails Contractuels</h3>
+                <div className="grid md:grid-cols-2 gap-4">
+                  {tender.contract_details.delai_execution && (
+                    <div className="flex items-start gap-3 p-3 rounded-lg bg-muted/30">
+                      <Clock className="w-5 h-5 text-primary mt-0.5 flex-shrink-0" />
+                      <div>
+                        <div className="text-xs text-muted-foreground mb-1">Délai d'exécution</div>
+                        <div className="font-medium text-sm">{tender.contract_details.delai_execution}</div>
+                      </div>
+                    </div>
+                  )}
+                  {tender.contract_details.penalite_retard && (
+                    <div className="flex items-start gap-3 p-3 rounded-lg bg-muted/30">
+                      <Percent className="w-5 h-5 text-warning mt-0.5 flex-shrink-0" />
+                      <div>
+                        <div className="text-xs text-muted-foreground mb-1">Pénalité de retard</div>
+                        <div className="font-medium text-sm">
+                          {typeof tender.contract_details.penalite_retard === 'string' 
+                            ? tender.contract_details.penalite_retard 
+                            : tender.contract_details.penalite_retard.taux}
+                        </div>
+                        {typeof tender.contract_details.penalite_retard === 'object' && tender.contract_details.penalite_retard.plafond && (
+                          <div className="text-xs text-muted-foreground mt-0.5">
+                            Plafond: {tender.contract_details.penalite_retard.plafond}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                  {tender.contract_details.mode_attribution && (
+                    <div className="flex items-start gap-3 p-3 rounded-lg bg-muted/30">
+                      <Award className="w-5 h-5 text-success mt-0.5 flex-shrink-0" />
+                      <div>
+                        <div className="text-xs text-muted-foreground mb-1">Mode d'attribution</div>
+                        <div className="font-medium text-sm">{tender.contract_details.mode_attribution}</div>
+                      </div>
+                    </div>
+                  )}
+                  {tender.contract_details.caution_definitive && (
+                    <div className="flex items-start gap-3 p-3 rounded-lg bg-muted/30">
+                      <Shield className="w-5 h-5 text-primary mt-0.5 flex-shrink-0" />
+                      <div>
+                        <div className="text-xs text-muted-foreground mb-1">Caution Définitive</div>
+                        <div className="font-medium text-sm">
+                          {typeof tender.contract_details.caution_definitive === 'string'
+                            ? tender.contract_details.caution_definitive
+                            : tender.contract_details.caution_definitive.taux}
+                        </div>
+                        {typeof tender.contract_details.caution_definitive === 'object' && (
+                          <>
+                            {tender.contract_details.caution_definitive.base && (
+                              <div className="text-xs text-muted-foreground mt-0.5">
+                                {tender.contract_details.caution_definitive.base}
+                              </div>
+                            )}
+                            {tender.contract_details.caution_definitive.montant_estime && (
+                              <div className="text-xs text-primary font-mono mt-1">
+                                ≈ {tender.contract_details.caution_definitive.montant_estime}
+                              </div>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </TabsContent>
 
           <TabsContent value="lots" className="space-y-4">
@@ -676,6 +748,21 @@ export default function TenderDetail() {
           </TabsContent>
 
           <TabsContent value="documents" className="space-y-4">
+            {/* Download all button */}
+            {tender.documents && tender.documents.length > 0 && (
+              <div className="flex justify-end">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    window.open(api.getDownloadZipUrl(tender.id), '_blank');
+                  }}
+                >
+                  <Archive className="w-4 h-4 mr-2" />
+                  Télécharger tout (ZIP)
+                </Button>
+              </div>
+            )}
             {tender.documents && tender.documents.length > 0 ? (
               <div className="space-y-3">
                 {tender.documents.map((doc) => (
@@ -691,8 +778,17 @@ export default function TenderDetail() {
                           {doc.page_count} pages • {doc.extraction_method}
                         </div>
                       </div>
-                      <div className="text-xs text-muted-foreground">
-                        {new Date(doc.extracted_at).toLocaleDateString()}
+                      <div className="flex items-center gap-2">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            window.open(api.getDownloadFileUrl(tender.id, doc.filename), '_blank');
+                          }}
+                          title="Télécharger ce fichier"
+                        >
+                          <Download className="w-4 h-4" />
+                        </Button>
                       </div>
                     </div>
                   </div>
