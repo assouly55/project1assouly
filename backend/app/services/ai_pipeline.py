@@ -347,6 +347,18 @@ class AIService:
             "primary_source": primary_source
         }
         
+        # DOUBLE VALIDATION: Run a second AI pass to verify extracted data
+        if total_articles > 0 and primary_source:
+            # Get the source content for validation
+            validation_content = ""
+            for doc in sorted_docs:
+                if doc.get("filename") == primary_source:
+                    validation_content = doc.get("raw_text", "")
+                    break
+            if validation_content:
+                final_result = self._validate_bordereau_data(final_result, validation_content)
+        
+        total_articles = sum(len(la["articles"]) for la in final_result["lots_articles"])
         logger.info("=" * 60)
         logger.info(f"✅ Extraction complete: {total_articles} items in {len(final_result['lots_articles'])} lots")
         logger.info("=" * 60)
@@ -453,6 +465,86 @@ class AIService:
         
         return result
     
+    def _validate_bordereau_data(
+        self,
+        extracted: Dict[str, Any],
+        original_content: str,
+    ) -> Dict[str, Any]:
+        """
+        Double-validation: Run a second AI pass to check extracted bordereau data
+        for errors in quantities, units, numbering, and designations.
+        """
+        lots = extracted.get("lots_articles", [])
+        total_items = sum(len(la.get("articles", [])) for la in lots)
+        
+        if total_items == 0:
+            return extracted
+        
+        logger.info(f"🔍 Validating {total_items} extracted items (double-check pass)...")
+        
+        # Build a summary of what was extracted
+        extracted_summary = json.dumps(extracted, ensure_ascii=False, indent=2)
+        
+        validation_prompt = """Tu es un vérificateur expert des Bordereaux des Prix des marchés publics marocains.
+
+On t'a donné un document source et les données extraites. Tu dois VÉRIFIER et CORRIGER les erreurs.
+
+VÉRIFIE STRICTEMENT:
+1. NUMÉROS: Les numero_prix doivent être séquentiels (1,2,3... ou 1.1,1.2...) sans trous
+2. QUANTITÉS: Comparer chaque quantité avec le document source - corrige si erronée
+3. UNITÉS: Vérifier que l'unité correspond au type d'article (ex: câble=ML, équipement=U)
+4. DÉSIGNATIONS: Doivent être COURTES (titre seulement, pas de description technique longue)
+5. ARTICLES MANQUÉS: Si le document source contient des articles non extraits, AJOUTE-les
+6. DOUBLONS: Supprime les articles dupliqués
+
+RÈGLES:
+- Si une valeur est correcte → la garder EXACTEMENT
+- Si une valeur est fausse → la corriger d'après le document source
+- Si un article manque → l'ajouter
+- NE PAS inventer de données absentes du document
+
+Retourne le JSON corrigé au MÊME FORMAT que l'entrée.
+Si tout est correct, retourne le même JSON sans changement."""
+
+        # Send last portion of content (where bordereau usually is) + extracted data
+        content_tail = original_content[-30000:] if len(original_content) > 30000 else original_content
+        
+        response = self._call_ai(
+            validation_prompt,
+            f"DONNÉES EXTRAITES:\n{extracted_summary}\n\n"
+            f"DOCUMENT SOURCE (fin du document):\n\n{content_tail}",
+            max_tokens=8192
+        )
+        
+        if not response:
+            logger.warning("Validation pass returned no response, keeping original extraction")
+            return extracted
+        
+        validated = self._parse_json_response(response)
+        if not validated or not validated.get("lots_articles"):
+            logger.warning("Validation parse failed, keeping original extraction")
+            return extracted
+        
+        # Compare counts
+        new_total = sum(len(la.get("articles", [])) for la in validated.get("lots_articles", []))
+        if new_total == 0:
+            logger.warning("Validation returned 0 items — ignoring, keeping original")
+            return extracted
+        
+        diff = new_total - total_items
+        if diff != 0:
+            logger.info(f"   📊 Validation adjusted items: {total_items} → {new_total} ({'+' if diff > 0 else ''}{diff})")
+        else:
+            logger.info(f"   ✅ Validation confirmed {total_items} items — no changes needed")
+        
+        # Preserve _completeness from original
+        if "_completeness" in extracted:
+            validated["_completeness"] = extracted["_completeness"]
+            validated["_completeness"]["total_articles"] = new_total
+            validated["_completeness"]["validated"] = True
+        
+        return validated
+
     def _merge_lots_articles(
         self,
         target: Dict[str, List],

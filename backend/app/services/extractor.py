@@ -710,7 +710,7 @@ def _extract_full_pdf_ocr(file_bytes: io.BytesIO) -> Tuple[str, int]:
                 from app.services.azure_doc_intelligence import reocr_bordereau_pages_azure
                 
                 file_bytes.seek(0)
-                enhanced_text = reocr_bordereau_pages_azure(file_bytes, text)
+                enhanced_text, bordereau_found = reocr_bordereau_pages_azure(file_bytes, text)
                 
                 if enhanced_text != text:
                     logger.info("✅ Bordereau pages enhanced with Azure Document Intelligence")

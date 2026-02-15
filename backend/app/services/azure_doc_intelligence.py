@@ -360,24 +360,89 @@ Si aucune page bordereau n'est trouvée, retourne: {"pages": []}"""
         return detect_bordereau_pages(ocr_text)
 
 
+def _ai_confirm_bordereau_in_pages(ocr_text: str, page_numbers: List[int]) -> List[int]:
+    """
+    Quick AI check: given specific pages from the OCR text, confirm which ones
+    actually contain bordereau content. Returns confirmed page numbers.
+    """
+    import json
+    from openai import OpenAI
+    from app.core.config import settings
+
+    if not settings.DEEPSEEK_API_KEY:
+        logger.info("No DeepSeek key — assuming all candidate pages are bordereau")
+        return page_numbers
+
+    # Extract just those pages' text
+    pages = re.split(r'---\s*Page\s+(\d+)\s*---', ocr_text)
+    page_texts = {}
+    for i in range(1, len(pages), 2):
+        if i + 1 < len(pages):
+            page_texts[int(pages[i])] = pages[i + 1].strip()
+
+    summaries = []
+    for pn in page_numbers:
+        text = page_texts.get(pn, "")[:400]
+        if text:
+            summaries.append(f"Page {pn}: {text}")
+
+    if not summaries:
+        return []
+
+    prompt = """Tu analyses des pages extraites d'un document de marché public marocain.
+Identifie lesquelles contiennent RÉELLEMENT un Bordereau des Prix (tableau avec N°, Désignation, Unité, Quantité, Prix).
+
+INDICES D'UNE VRAIE PAGE BORDEREAU:
+- Tableau structuré avec colonnes prix/quantité
+- Lignes numérotées avec articles et montants
+- Mots clés: "Bordereau", "Prix Unitaire", "Montant", "BPDE"
+
+NE PAS inclure: pages de clauses, conditions, spécifications techniques sans tableau de prix.
+
+Retourne UNIQUEMENT: {"pages": [5,6,7], "found": true}
+Si aucune page bordereau: {"pages": [], "found": false}"""
+
+    try:
+        client = OpenAI(api_key=settings.DEEPSEEK_API_KEY, base_url=settings.DEEPSEEK_BASE_URL)
+        response = client.chat.completions.create(
+            model=settings.DEEPSEEK_MODEL,
+            messages=[
+                {"role": "system", "content": prompt},
+                {"role": "user", "content": "\n\n".join(summaries)},
+            ],
+            max_tokens=256,
+            temperature=0,
+        )
+        result_text = response.choices[0].message.content.strip()
+        json_str = result_text
+        if "```json" in result_text:
+            json_str = result_text.split("```json")[1].split("```")[0]
+        elif "```" in result_text:
+            json_str = result_text.split("```")[1].split("```")[0]
+
+        data = json.loads(json_str.strip())
+        confirmed = sorted(data.get("pages", []))
+        found = data.get("found", len(confirmed) > 0)
+
+        logger.info(f"🔍 AI confirmation on candidate pages: found={found}, pages={confirmed}")
+        return confirmed if found else page_numbers  # If AI says no, still try all (safety)
+
+    except Exception as e:
+        logger.error(f"AI bordereau confirmation failed: {e}, using all candidate pages")
+        return page_numbers
+
+
 def reocr_bordereau_pages_azure(
     file_bytes: io.BytesIO,
     original_text: str,
     force_pages: Optional[List[int]] = None,
-) -> str:
+) -> Tuple[str, bool]:
     """
-    Re-process bordereau pages using Azure Document Intelligence,
-    replacing plain OCR text with structured table output.
+    Re-process bordereau pages using Azure Document Intelligence.
 
-    Uses AI to detect which pages contain bordereau tables (consecutive
-    page ranges), then sends only those to Azure DI for high-fidelity
-    extraction.
-
-    IMPORTANT: If AI detection fails to find any bordereau pages, we
-    force the last N pages of the document since bordereaux are ALWAYS
-    at the end of CPS documents. Every tender must have a bordereau.
-
-    Falls back to the original text if Azure DI is not configured or fails.
+    Returns:
+        Tuple of (processed_text, bordereau_found) — bordereau_found indicates
+        whether bordereau pages were confirmed, so callers can skip remaining files.
     """
 
     if force_pages:
@@ -385,23 +450,31 @@ def reocr_bordereau_pages_azure(
     else:
         bordereau_pages = _ai_detect_bordereau_pages(original_text)
 
+    bordereau_confirmed = bool(bordereau_pages)
+
     # FALLBACK: If AI found no bordereau pages, force the last pages
-    # Every tender MUST have a bordereau — it's typically at the END of the CPS
     if not bordereau_pages:
-        # Count total pages from the OCR text markers
         page_numbers_in_text = re.findall(r'---\s*Page\s+(\d+)\s*---', original_text)
         if page_numbers_in_text:
             total_pages = max(int(p) for p in page_numbers_in_text)
-            # Take the last 10 pages (or all if fewer)
             force_start = max(1, total_pages - 9)
-            bordereau_pages = list(range(force_start, total_pages + 1))
+            candidate_pages = list(range(force_start, total_pages + 1))
             logger.warning(
-                f"⚠ AI found no bordereau pages — forcing last {len(bordereau_pages)} "
-                f"pages ({force_start}-{total_pages}) for Azure DI extraction"
+                f"⚠ AI found no bordereau pages — checking last {len(candidate_pages)} "
+                f"pages ({force_start}-{total_pages}) with AI confirmation first"
             )
+            # Run AI confirmation on these candidate pages
+            confirmed = _ai_confirm_bordereau_in_pages(original_text, candidate_pages)
+            if confirmed:
+                bordereau_pages = confirmed
+                bordereau_confirmed = True
+                logger.info(f"✅ AI confirmed bordereau in pages: {bordereau_pages}")
+            else:
+                bordereau_pages = candidate_pages  # Use all as last resort
+                logger.warning("⚠ AI could not confirm — using all candidate pages anyway")
         else:
             logger.info("No bordereau pages detected and no page markers found, keeping original OCR")
-            return original_text
+            return original_text, False
 
     # Limit pages
     MAX_PAGES = 15
@@ -424,7 +497,7 @@ def reocr_bordereau_pages_azure(
 
     if not azure_results:
         logger.warning("Azure DI returned no results, keeping original OCR")
-        return original_text
+        return original_text, bordereau_confirmed
 
     # Merge Azure results into the original text
     result_text = original_text
@@ -450,4 +523,4 @@ def reocr_bordereau_pages_azure(
             )
             result_text = new_text
 
-    return result_text
+    return result_text, bordereau_confirmed
