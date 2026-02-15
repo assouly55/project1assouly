@@ -159,6 +159,35 @@ function CategoryPath({ categories }: { categories: TenderCategory[] }) {
 }
 
 // Helper to safely extract string value from potentially nested objects like {value, source_document}
+// --- Contract detail formatting helpers ---
+
+/** Format délai d'exécution as a clean period string */
+function formatDelaiDetail(raw: string): string {
+  if (!raw) return '—';
+  const lower = raw.toLowerCase().trim();
+  const match = lower.match(/(\d+)\s*(jours?|mois|ans?|semaines?|days?|months?|years?|weeks?|calendaires?|ouvrables?)/i);
+  if (match) {
+    const num = match[1];
+    const unit = match[2].toLowerCase();
+    if (unit.startsWith('jour') || unit.startsWith('day') || unit.startsWith('calendaire') || unit.startsWith('ouvrable')) return `${num} Jours`;
+    if (unit.startsWith('mois') || unit.startsWith('month')) return `${num} Mois`;
+    if (unit.startsWith('an') || unit.startsWith('year')) return `${num} Ans`;
+    if (unit.startsWith('semaine') || unit.startsWith('week')) return `${num} Semaines`;
+  }
+  return raw;
+}
+
+/** Format caution définitive taux as percentage */
+function formatCautionDetail(cd: ContractDetails['caution_definitive']): string {
+  if (!cd) return '—';
+  if (typeof cd === 'string') return cd;
+  const taux = cd.taux;
+  if (!taux) return '—';
+  const clean = taux.trim();
+  if (!clean.includes('%')) return `${clean}%`;
+  return clean;
+}
+
 function safeString(val: unknown): string | null {
   if (val === null || val === undefined) return null;
   if (typeof val === 'string') return val;
@@ -652,7 +681,7 @@ export default function TenderDetail() {
                       <Clock className="w-5 h-5 text-primary mt-0.5 flex-shrink-0" />
                       <div>
                         <div className="text-xs text-muted-foreground mb-1">Délai d'exécution</div>
-                        <div className="font-medium text-sm">{tender.contract_details.delai_execution}</div>
+                        <div className="font-medium text-sm">{formatDelaiDetail(tender.contract_details.delai_execution)}</div>
                       </div>
                     </div>
                   )}
@@ -664,7 +693,7 @@ export default function TenderDetail() {
                         <div className="font-medium text-sm">
                           {typeof tender.contract_details.penalite_retard === 'string' 
                             ? tender.contract_details.penalite_retard 
-                            : tender.contract_details.penalite_retard.taux}
+                            : tender.contract_details.penalite_retard.taux || '—'}
                         </div>
                         {typeof tender.contract_details.penalite_retard === 'object' && tender.contract_details.penalite_retard.plafond && (
                           <div className="text-xs text-muted-foreground mt-0.5">
@@ -689,9 +718,7 @@ export default function TenderDetail() {
                       <div>
                         <div className="text-xs text-muted-foreground mb-1">Caution Définitive</div>
                         <div className="font-medium text-sm">
-                          {typeof tender.contract_details.caution_definitive === 'string'
-                            ? tender.contract_details.caution_definitive
-                            : tender.contract_details.caution_definitive.taux}
+                          {formatCautionDetail(tender.contract_details.caution_definitive)}
                         </div>
                         {typeof tender.contract_details.caution_definitive === 'object' && (
                           <>
@@ -701,7 +728,7 @@ export default function TenderDetail() {
                               </div>
                             )}
                             {tender.contract_details.caution_definitive.montant_estime && (
-                              <div className="text-xs text-primary font-mono mt-1">
+                              <div className="text-xs text-primary font-mono mt-1 font-semibold">
                                 ≈ {tender.contract_details.caution_definitive.montant_estime}
                               </div>
                             )}

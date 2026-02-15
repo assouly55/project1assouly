@@ -46,6 +46,7 @@ class ProcessedDocument:
     article_index: Optional[List[Dict]] = None  # For CPS/RC
     success: bool = True
     error: Optional[str] = None
+    bordereau_found: bool = False
 
 
 @dataclass
@@ -183,10 +184,14 @@ def process_single_document(
     file_bytes: io.BytesIO,
     tender_ref: Optional[str] = None,
     light_mode: bool = False,
+    skip_bordereau_reocr: bool = False,
 ) -> ProcessedDocument:
     """
     Process a single document: extract text, classify, and index articles.
     Runs in thread pool for parallel processing.
+    
+    Args:
+        skip_bordereau_reocr: If True, skip Azure DI bordereau re-OCR
     """
     try:
         # First page scan for classification
@@ -216,7 +221,8 @@ def process_single_document(
         extraction = extract_full_document(
             filename, 
             file_bytes, 
-            effective_scanned
+            effective_scanned,
+            skip_bordereau_reocr=skip_bordereau_reocr,
         )
         
         if not extraction.success:
@@ -249,7 +255,8 @@ def process_single_document(
             file_size_bytes=extraction.file_size_bytes,
             mime_type=extraction.mime_type,
             article_index=article_index,
-            success=True
+            success=True,
+            bordereau_found=extraction.bordereau_found,
         )
         
     except Exception as e:
@@ -273,6 +280,7 @@ async def process_documents_concurrent(
     max_workers: int = 1,
     on_progress: Optional[Callable[[str], None]] = None,
     light_mode: bool = False,
+    skip_bordereau_reocr: bool = False,
 ) -> List[ProcessedDocument]:
     """
     Process documents one by one sequentially for better tracking and resource usage.
@@ -283,6 +291,7 @@ async def process_documents_concurrent(
         max_workers: Ignored (kept for API compat), always processes sequentially
         on_progress: Optional callback for progress updates
         light_mode: If True, skip OCR for scanned PDFs (bordereau already available)
+        skip_bordereau_reocr: If True, skip Azure DI bordereau re-OCR for all files
         
     Returns:
         List of ProcessedDocument results
@@ -299,15 +308,26 @@ async def process_documents_concurrent(
     if on_progress:
         on_progress(f"Processing {total} documents sequentially (focused mode)")
     
+    # Track bordereau_found across files in this batch
+    batch_bordereau_found = skip_bordereau_reocr
+    
     for idx, (filename, file_bytes) in enumerate(valid_files.items(), 1):
         if on_progress:
             on_progress(f"[{idx}/{total}] Processing: {filename}")
         
         t0 = time.monotonic()
         try:
-            result = process_single_document(filename, file_bytes, tender_ref, light_mode)
+            result = process_single_document(
+                filename, file_bytes, tender_ref, light_mode,
+                skip_bordereau_reocr=batch_bordereau_found,
+            )
             elapsed = time.monotonic() - t0
             results.append(result)
+            
+            # If this file found the bordereau, skip Azure for remaining files
+            if result.bordereau_found and not batch_bordereau_found:
+                batch_bordereau_found = True
+                logger.info(f"🎯 Bordereau found in {filename} — skipping Azure fallback for remaining files")
             
             if on_progress:
                 status = "✓" if result.success else "✗"
@@ -467,6 +487,7 @@ async def process_tender_documents(
     
     all_documents = []
     has_excel_bordereau = False  # Track if we got bordereau from Excel (no OCR needed)
+    bordereau_already_found = False  # Track if Azure DI found bordereau in any file
     
     # Step 3: Process BORDEREAU files FIRST (priority processing)
     if bordereau_files:
@@ -488,6 +509,11 @@ async def process_tender_documents(
             d.success and d.raw_text and is_excel_file(d.filename)
             for d in bordereau_docs
         )
+        
+        # Check if Azure DI found bordereau in any file
+        if any(d.bordereau_found for d in bordereau_docs):
+            bordereau_already_found = True
+            logger.info("🎯 Bordereau found via Azure DI in bordereau files — skipping Azure for remaining")
         
         if has_excel_bordereau:
             logger.info("⚡ Excel bordereau found — remaining files will skip OCR")
@@ -514,8 +540,14 @@ async def process_tender_documents(
             max_workers,
             on_progress,
             light_mode=has_excel_bordereau,
+            skip_bordereau_reocr=bordereau_already_found,
         )
         all_documents.extend(cps_docs)
+        
+        # Check if CPS processing found bordereau
+        if any(d.bordereau_found for d in cps_docs):
+            bordereau_already_found = True
+            logger.info("🎯 Bordereau found via Azure DI in CPS — skipping Azure for remaining files")
         
         # If no bordereau files were found, CPS might contain bordereau
         # Trigger callback so AI can try extracting from CPS
@@ -552,6 +584,7 @@ async def process_tender_documents(
             max_workers,
             on_progress,
             light_mode=has_excel_bordereau,
+            skip_bordereau_reocr=bordereau_already_found,
         )
         all_documents.extend(other_docs)
     

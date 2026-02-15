@@ -59,6 +59,47 @@ function MetadataField({ label, value }: { label: string; value: string | null |
   );
 }
 
+// --- Contract detail formatting helpers ---
+
+/** Format délai d'exécution as a clean period string */
+function formatDelai(raw: string): string {
+  if (!raw) return '—';
+  const lower = raw.toLowerCase().trim();
+  // Extract number + unit
+  const match = lower.match(/(\d+)\s*(jours?|mois|ans?|semaines?|days?|months?|years?|weeks?|calendaires?|ouvrables?)/i);
+  if (match) {
+    const num = match[1];
+    const unit = match[2].toLowerCase();
+    if (unit.startsWith('jour') || unit.startsWith('day') || unit.startsWith('calendaire') || unit.startsWith('ouvrable')) return `${num} Jours`;
+    if (unit.startsWith('mois') || unit.startsWith('month')) return `${num} Mois`;
+    if (unit.startsWith('an') || unit.startsWith('year')) return `${num} Ans`;
+    if (unit.startsWith('semaine') || unit.startsWith('week')) return `${num} Semaines`;
+  }
+  return raw;
+}
+
+/** Format pénalité de retard as a percentage string */
+function formatPenalite(pen: ContractDetails['penalite_retard']): string {
+  if (!pen) return '—';
+  if (typeof pen === 'string') return pen;
+  const taux = pen.taux;
+  if (!taux) return '—';
+  // Normalize: if it contains ‰ or /1000, display as-is. If it has %, display as-is.
+  return taux;
+}
+
+/** Format caution définitive taux */
+function formatCautionTaux(cd: ContractDetails['caution_definitive']): string {
+  if (!cd) return '—';
+  if (typeof cd === 'string') return cd;
+  const taux = cd.taux;
+  if (!taux) return '—';
+  // Ensure it shows as percentage
+  const clean = taux.trim();
+  if (!clean.includes('%')) return `${clean}%`;
+  return clean;
+}
+
 function AvisMetadataDetails({ rawMetadata, contractDetails }: { rawMetadata: any; contractDetails?: ContractDetails | null }) {
   const metadata = normalizeAvisMetadata(rawMetadata);
   
@@ -158,8 +199,8 @@ function AvisMetadataDetails({ rawMetadata, contractDetails }: { rawMetadata: an
               <div className="flex items-center gap-2 text-sm">
                 <Clock className="w-3.5 h-3.5 text-primary flex-shrink-0" />
                 <div>
-                  <span className="text-xs text-muted-foreground block">Délai</span>
-                  <span>{contractDetails.delai_execution}</span>
+                  <span className="text-xs text-muted-foreground block">Délai d'exécution</span>
+                  <span>{formatDelai(contractDetails.delai_execution)}</span>
                 </div>
               </div>
             )}
@@ -167,12 +208,11 @@ function AvisMetadataDetails({ rawMetadata, contractDetails }: { rawMetadata: an
               <div className="flex items-center gap-2 text-sm">
                 <Percent className="w-3.5 h-3.5 text-warning flex-shrink-0" />
                 <div>
-                  <span className="text-xs text-muted-foreground block">Pénalité</span>
-                  <span>
-                    {typeof contractDetails.penalite_retard === 'string'
-                      ? contractDetails.penalite_retard
-                      : contractDetails.penalite_retard.taux}
-                  </span>
+                  <span className="text-xs text-muted-foreground block">Pénalité de retard</span>
+                  <span>{formatPenalite(contractDetails.penalite_retard)}</span>
+                  {typeof contractDetails.penalite_retard === 'object' && contractDetails.penalite_retard.plafond && (
+                    <span className="text-xs text-muted-foreground block">Plafond: {contractDetails.penalite_retard.plafond}</span>
+                  )}
                 </div>
               </div>
             )}
@@ -190,11 +230,7 @@ function AvisMetadataDetails({ rawMetadata, contractDetails }: { rawMetadata: an
                 <Shield className="w-3.5 h-3.5 text-primary flex-shrink-0" />
                 <div>
                   <span className="text-xs text-muted-foreground block">Caution Déf.</span>
-                  <span>
-                    {typeof contractDetails.caution_definitive === 'string'
-                      ? contractDetails.caution_definitive
-                      : contractDetails.caution_definitive.taux}
-                  </span>
+                  <span>{formatCautionTaux(contractDetails.caution_definitive)}</span>
                   {typeof contractDetails.caution_definitive === 'object' && contractDetails.caution_definitive.montant_estime && (
                     <span className="text-xs text-primary block font-mono">≈ {contractDetails.caution_definitive.montant_estime}</span>
                   )}
