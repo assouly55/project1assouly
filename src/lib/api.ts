@@ -184,6 +184,24 @@ class TenderApiClient {
   }
 
   // ============================
+  // DOCUMENT DOWNLOAD
+  // ============================
+
+  /**
+   * Get URL to download the full tender ZIP
+   */
+  getDownloadZipUrl(tenderId: string): string {
+    return `${this.baseUrl}/api/tenders/${tenderId}/download-zip`;
+  }
+
+  /**
+   * Get URL to download a single file from the tender
+   */
+  getDownloadFileUrl(tenderId: string, filename: string): string {
+    return `${this.baseUrl}/api/tenders/${tenderId}/download-file/${encodeURIComponent(filename)}`;
+  }
+
+  // ============================
   // HEALTH CHECK
   // ============================
 

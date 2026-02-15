@@ -57,6 +57,21 @@ export interface AvisMetadata {
   };
 }
 
+// Phase 2b: Contract details
+export interface ContractDetails {
+  delai_execution: string | null;
+  penalite_retard: {
+    taux: string | null;
+    plafond: string | null;
+  } | null;
+  mode_attribution: string | null;
+  caution_definitive: {
+    taux: string | null;
+    base: string | null;
+    montant_estime: string | null;
+  } | null;
+}
+
 // Phase 2: Bordereau des Prix
 export interface BordereauMetadata {
   lots_articles: LotArticles[];
@@ -91,6 +106,7 @@ export interface Tender {
   bordereau_metadata: BordereauMetadata | null;
   universal_metadata: BordereauMetadata | null;  // Backward compat alias
   categories?: TenderCategory[] | null;
+  contract_details?: ContractDetails | null;
   documents?: TenderDocument[];
   created_at: string;
   updated_at: string;

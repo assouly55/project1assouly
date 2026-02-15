@@ -99,6 +99,10 @@ class Tender(Base):
     # Structure: [{main_category, subcategory, item, confidence, reason}]
     categories = Column(JSONB, nullable=True)
     
+    # Contract details (Phase 2b)
+    # Structure: {delai_execution, penalite_retard: {taux, plafond}, mode_attribution, caution_definitive: {taux, base}}
+    contract_details = Column(JSONB, nullable=True)
+    
     # Article index for CPS/RC documents (for smart AI analysis)
     # Structure: {"CPS": {"articles": [...], "total_chars": int}, "RC": {...}}
     article_index = Column(JSONB, nullable=True)

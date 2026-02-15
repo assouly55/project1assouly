@@ -428,6 +428,42 @@ async def _process_single_tender(
                         tender.categories = categories
                         logger.info(f"[{idx}] ✓ Assigned {len(categories)} categories")
                 
+                # Step 7b: Contract details extraction (Phase 2b)
+                if documents_for_phase2:
+                    logger.info(f"[{idx}] Phase 2b: Extracting contract details...")
+                    contract_details = ai_service.extract_contract_details(documents_for_phase2)
+                    if contract_details:
+                        # Estimate caution definitive amount if we have estimation totale
+                        if merged_metadata:
+                            estimation = merged_metadata.get("estimation_totale", {})
+                            montant_str = estimation.get("montant") if isinstance(estimation, dict) else None
+                            if montant_str and contract_details.get("caution_definitive"):
+                                cd = contract_details["caution_definitive"]
+                                taux_str = cd.get("taux", "") if isinstance(cd, dict) else str(cd)
+                                try:
+                                    # Extract percentage
+                                    import re as _re
+                                    pct_match = _re.search(r'(\d+(?:[.,]\d+)?)\s*%', taux_str)
+                                    if pct_match:
+                                        pct = float(pct_match.group(1).replace(',', '.'))
+                                        # Clean montant string
+                                        montant_clean = _re.sub(r'[^\d.,]', '', str(montant_str)).replace(',', '.')
+                                        if montant_clean:
+                                            montant_val = float(montant_clean)
+                                            estimated_cd = montant_val * pct / 100
+                                            if isinstance(cd, dict):
+                                                cd["montant_estime"] = f"{estimated_cd:,.2f} DH"
+                                            else:
+                                                contract_details["caution_definitive"] = {
+                                                    "taux": taux_str,
+                                                    "montant_estime": f"{estimated_cd:,.2f} DH"
+                                                }
+                                except Exception as e:
+                                    logger.debug(f"Could not estimate caution definitive: {e}")
+                        
+                        tender.contract_details = contract_details
+                        logger.info(f"[{idx}] ✓ Contract details extracted")
+                
                 # Step 8: Mark as ANALYZED (fully processed)
                 tender.status = TenderStatus.ANALYZED
                 db.commit()
@@ -1198,6 +1234,159 @@ def extract_technical_pages(
         )
 
 
+# ============================
+# DOCUMENT DOWNLOAD ENDPOINTS
+# ============================
+
+@router.get("/api/tenders/{tender_id}/download-zip")
+def download_tender_zip(tender_id: str, db: Session = Depends(get_db)):
+    """
+    Re-download the full tender ZIP from the source website and stream it to the user.
+    The ZIP is downloaded to memory, streamed, then discarded.
+    """
+    from fastapi.responses import StreamingResponse
+    from loguru import logger
+    
+    tender = db.query(Tender).filter(Tender.id == tender_id).first()
+    if not tender:
+        raise HTTPException(404, "Tender not found")
+    
+    if not tender.source_url:
+        raise HTTPException(400, "No source URL available")
+    
+    logger.info(f"📥 Downloading ZIP for tender {tender_id}")
+    
+    zip_bytes = _download_zip_sync(tender.source_url)
+    if not zip_bytes:
+        raise HTTPException(500, "Failed to download ZIP from source")
+    
+    filename = f"{tender.external_reference or tender_id}.zip"
+    
+    return StreamingResponse(
+        iter([zip_bytes]),
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+    )
+
+
+@router.get("/api/tenders/{tender_id}/download-file/{filename:path}")
+def download_single_file(tender_id: str, filename: str, db: Session = Depends(get_db)):
+    """
+    Download a single file from the tender ZIP.
+    Re-downloads ZIP, extracts the specific file, streams it, then cleans up.
+    """
+    from fastapi.responses import StreamingResponse
+    from loguru import logger
+    import mimetypes
+    
+    tender = db.query(Tender).filter(Tender.id == tender_id).first()
+    if not tender:
+        raise HTTPException(404, "Tender not found")
+    
+    if not tender.source_url:
+        raise HTTPException(400, "No source URL available")
+    
+    logger.info(f"📥 Downloading file '{filename}' from tender {tender_id}")
+    
+    zip_bytes = _download_zip_sync(tender.source_url)
+    if not zip_bytes:
+        raise HTTPException(500, "Failed to download ZIP from source")
+    
+    # Extract the specific file
+    import zipfile as zf_mod
+    import io as io_mod
+    
+    try:
+        with zf_mod.ZipFile(io_mod.BytesIO(zip_bytes), 'r') as zf:
+            # Find the file (exact match or partial match)
+            matching_name = None
+            for name in zf.namelist():
+                if name == filename or name.endswith(f"/{filename}"):
+                    matching_name = name
+                    break
+            
+            # Fuzzy match: try matching just the basename
+            if not matching_name:
+                target_basename = filename.split("/")[-1].lower()
+                for name in zf.namelist():
+                    if name.split("/")[-1].lower() == target_basename:
+                        matching_name = name
+                        break
+            
+            if not matching_name:
+                raise HTTPException(404, f"File '{filename}' not found in ZIP")
+            
+            file_bytes = zf.read(matching_name)
+    except zf_mod.BadZipFile:
+        raise HTTPException(500, "Downloaded file is not a valid ZIP")
+    
+    # Determine MIME type
+    mime_type, _ = mimetypes.guess_type(filename)
+    if not mime_type:
+        mime_type = "application/octet-stream"
+    
+    safe_filename = filename.split("/")[-1]
+    
+    return StreamingResponse(
+        iter([file_bytes]),
+        media_type=mime_type,
+        headers={"Content-Disposition": f'attachment; filename="{safe_filename}"'}
+    )
+
+
+def _download_zip_sync(source_url: str) -> Optional[bytes]:
+    """Download tender ZIP synchronously using Playwright in a thread."""
+    import threading
+    from loguru import logger
+    
+    result_holder = {"zip_bytes": None}
+    
+    def run():
+        if sys.platform == "win32":
+            loop = asyncio.ProactorEventLoop()
+        else:
+            loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        try:
+            result_holder["zip_bytes"] = loop.run_until_complete(_download_zip_async(source_url))
+        except Exception as e:
+            logger.error(f"ZIP download failed: {e}")
+        finally:
+            loop.close()
+    
+    thread = threading.Thread(target=run)
+    thread.start()
+    thread.join(timeout=120)
+    
+    return result_holder["zip_bytes"]
+
+
+async def _download_zip_async(source_url: str) -> Optional[bytes]:
+    """Download ZIP from marchespublics.gov.ma."""
+    from playwright.async_api import async_playwright
+    from app.core.config import settings
+    from loguru import logger
+    
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=settings.SCRAPER_HEADLESS)
+        context = await browser.new_context(accept_downloads=True)
+        
+        try:
+            scraper = TenderScraper()
+            downloaded = await scraper.download_tender_zip(
+                context, source_url, idx=0, website_metadata=None
+            )
+            
+            if downloaded.success and downloaded.zip_bytes:
+                return downloaded.zip_bytes
+            
+            logger.error(f"Download failed: {downloaded.error}")
+            return None
+        finally:
+            await browser.close()
+
+
 @router.post("/api/tenders/{tender_id}/ask", response_model=AskAIResponse)
 def ask_ai_about_tender(
     tender_id: str,
@@ -1459,6 +1648,7 @@ def _tender_to_dict(tender: Tender) -> dict:
         "bordereau_metadata": tender.bordereau_metadata,
         "universal_metadata": tender.universal_metadata,  # Backward compat
         "categories": tender.categories,  # Phase 4: Category classification
+        "contract_details": tender.contract_details,  # Phase 2b: Contract details
         "article_index": tender.article_index,
         "error_message": tender.error_message,
         "created_at": tender.created_at.isoformat() if tender.created_at else None,

@@ -36,6 +36,7 @@ _PROMPTS: Dict[str, Optional[str]] = {
     "ask_ai": None,
     "ask_ai_selector": None,
     "category": None,
+    "contract_details": None,
 }
 
 # Lazy-loaded category tree
@@ -80,6 +81,12 @@ def get_category_prompt() -> str:
     if _PROMPTS["category"] is None:
         _PROMPTS["category"] = _load_prompt("category_classification_prompt.txt")
     return _PROMPTS["category"]
+
+
+def get_contract_details_prompt() -> str:
+    if _PROMPTS["contract_details"] is None:
+        _PROMPTS["contract_details"] = _load_prompt("contract_details_extraction_prompt.txt")
+    return _PROMPTS["contract_details"]
 
 
 def get_category_list_formatted() -> str:
@@ -558,6 +565,79 @@ class AIService:
         logger.info("=" * 60)
         
         return final_result if total_articles > 0 else None
+
+    # =========================================================================
+    # CONTRACT DETAILS EXTRACTION (Phase 2b)
+    # =========================================================================
+    
+    def extract_contract_details(
+        self,
+        documents: List[Dict],
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Extract contract details: delai d'execution, penalite, mode d'attribution,
+        caution definitive from tender documents.
+        
+        Prioritizes CPS > RC > other documents.
+        """
+        logger.info("📋 Extracting contract details (delai, penalite, attribution, caution)...")
+        
+        # Sort: CPS first, then RC, then others
+        def priority(doc):
+            dt = doc.get("document_type", "").upper()
+            fname = doc.get("filename", "").lower()
+            if dt == "CPS" or "cps" in fname:
+                return 0
+            if dt == "RC" or "rc" in fname or "reglement" in fname:
+                return 1
+            return 10
+        
+        sorted_docs = sorted(documents, key=priority)
+        
+        # Build context from top documents (CPS + RC usually enough)
+        context_parts = []
+        total_chars = 0
+        max_chars = 40000
+        
+        for doc in sorted_docs:
+            content = doc.get("raw_text", "")
+            if not content or len(content.strip()) < 100:
+                continue
+            
+            remaining = max_chars - total_chars
+            if remaining <= 0:
+                break
+            
+            chunk = content[:remaining]
+            context_parts.append(f"=== DOCUMENT: {doc.get('filename', 'unknown')} ({doc.get('document_type', 'UNKNOWN')}) ===\n{chunk}")
+            total_chars += len(chunk)
+        
+        if not context_parts:
+            logger.warning("No documents available for contract details extraction")
+            return None
+        
+        full_context = "\n\n".join(context_parts)
+        
+        response = self._call_ai(
+            get_contract_details_prompt(),
+            f"DOCUMENTS DE L'APPEL D'OFFRES:\n\n{full_context}",
+            max_tokens=2048
+        )
+        
+        if not response:
+            logger.warning("No response from AI for contract details")
+            return None
+        
+        result = self._parse_json_response(response)
+        if not result:
+            logger.warning("Failed to parse contract details response")
+            return None
+        
+        # Estimate caution definitive if we have estimation totale
+        # This is done later in the pipeline when we have avis_metadata
+        
+        logger.info(f"✅ Contract details extracted: {json.dumps(result, ensure_ascii=False)[:200]}")
+        return result
 
     # Legacy method for backward compatibility
     def extract_bordereau_items(
