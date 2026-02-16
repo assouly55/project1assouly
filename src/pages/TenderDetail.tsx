@@ -161,31 +161,87 @@ function CategoryPath({ categories }: { categories: TenderCategory[] }) {
 // Helper to safely extract string value from potentially nested objects like {value, source_document}
 // --- Contract detail formatting helpers ---
 
-/** Format délai d'exécution as a clean period string */
+/** Format délai as clean "X Jours" | "X Mois" | "X Ans" */
 function formatDelaiDetail(raw: string): string {
   if (!raw) return '—';
-  const lower = raw.toLowerCase().trim();
-  const match = lower.match(/(\d+)\s*(jours?|mois|ans?|semaines?|days?|months?|years?|weeks?|calendaires?|ouvrables?)/i);
-  if (match) {
-    const num = match[1];
-    const unit = match[2].toLowerCase();
-    if (unit.startsWith('jour') || unit.startsWith('day') || unit.startsWith('calendaire') || unit.startsWith('ouvrable')) return `${num} Jours`;
-    if (unit.startsWith('mois') || unit.startsWith('month')) return `${num} Mois`;
-    if (unit.startsWith('an') || unit.startsWith('year')) return `${num} Ans`;
-    if (unit.startsWith('semaine') || unit.startsWith('week')) return `${num} Semaines`;
-  }
-  return raw;
+  const match = raw.match(/(\d+)/);
+  if (!match) return raw;
+  const num = match[1];
+  const lower = raw.toLowerCase();
+  if (/mois|month/i.test(lower)) return `${num} Mois`;
+  if (/an|year/i.test(lower)) return `${num} Ans`;
+  if (/semaine|week/i.test(lower)) return `${num} Semaines`;
+  return `${num} Jours`;
 }
 
-/** Format caution définitive taux as percentage */
+/** Normalize penalite taux */
+function formatPenaliteDetail(pen: ContractDetails['penalite_retard']): string {
+  if (!pen) return '—';
+  if (typeof pen === 'string') return pen;
+  const taux = pen.taux;
+  if (!taux) return '—';
+  const fracMatch = taux.match(/(\d+(?:[.,]\d+)?)\s*[/÷]\s*(\d+)/);
+  if (fracMatch) {
+    const pct = (parseFloat(fracMatch[1].replace(',', '.')) / parseFloat(fracMatch[2])) * 100;
+    return `${pct}% /jour`;
+  }
+  const pctMatch = taux.match(/([\d.,]+)\s*%/);
+  if (pctMatch) return `${pctMatch[1]}% /jour`;
+  const perMilleMatch = taux.match(/([\d.,]+)\s*‰/);
+  if (perMilleMatch) {
+    const pct = parseFloat(perMilleMatch[1].replace(',', '.')) / 10;
+    return `${pct}% /jour`;
+  }
+  return taux;
+}
+
+/** Format plafond as clean percentage */
+function formatPlafondDetail(plafond: string | null): string | null {
+  if (!plafond) return null;
+  const match = plafond.match(/([\d.,]+)\s*%/);
+  if (match) return `${match[1]}%`;
+  return plafond;
+}
+
+/** Extract numeric percentage from caution */
+function parseCautionPercentDetail(cd: ContractDetails['caution_definitive']): number | null {
+  if (!cd || typeof cd === 'string') return null;
+  const taux = cd.taux;
+  if (!taux) return null;
+  const match = taux.match(/([\d.,]+)/);
+  if (match) return parseFloat(match[1].replace(',', '.'));
+  return null;
+}
+
+/** Format caution taux as clean percentage */
 function formatCautionDetail(cd: ContractDetails['caution_definitive']): string {
   if (!cd) return '—';
   if (typeof cd === 'string') return cd;
-  const taux = cd.taux;
-  if (!taux) return '—';
-  const clean = taux.trim();
-  if (!clean.includes('%')) return `${clean}%`;
-  return clean;
+  const pct = parseCautionPercentDetail(cd);
+  if (pct !== null) return `${pct}%`;
+  return cd.taux || '—';
+}
+
+/** Parse estimation montant to number */
+function parseEstimationDetail(montant: string | null | undefined): number | null {
+  if (!montant) return null;
+  const clean = montant.replace(/\s/g, '').replace(',', '.');
+  const match = clean.match(/([\d.]+)/);
+  if (match) return parseFloat(match[1]);
+  return null;
+}
+
+/** Calculate: estimation × (caution% / 100) */
+function calculateCautionMontantDetail(
+  estimation: { montant: string | null; devise: string | null } | undefined,
+  caution: ContractDetails['caution_definitive']
+): string | null {
+  const estValue = parseEstimationDetail(estimation?.montant);
+  const pct = parseCautionPercentDetail(caution);
+  if (estValue === null || pct === null) return null;
+  const amount = estValue * (pct / 100);
+  const devise = estimation?.devise || 'DH';
+  return `${amount.toLocaleString('fr-FR', { maximumFractionDigits: 2 })} ${devise}`;
 }
 
 function safeString(val: unknown): string | null {
@@ -693,14 +749,12 @@ export default function TenderDetail() {
                       <div className="text-xs text-muted-foreground mb-1">Pénalité de retard</div>
                       <div className="font-medium text-sm">
                         {tender.contract_details.penalite_retard
-                          ? (typeof tender.contract_details.penalite_retard === 'string' 
-                              ? tender.contract_details.penalite_retard 
-                              : tender.contract_details.penalite_retard.taux || '— %')
+                          ? formatPenaliteDetail(tender.contract_details.penalite_retard)
                           : <span className="text-muted-foreground italic">— %</span>}
                       </div>
                       {typeof tender.contract_details.penalite_retard === 'object' && tender.contract_details.penalite_retard?.plafond && (
                         <div className="text-xs text-muted-foreground mt-0.5">
-                          Plafond: {tender.contract_details.penalite_retard.plafond}
+                          Plafond: {formatPlafondDetail(tender.contract_details.penalite_retard.plafond) || tender.contract_details.penalite_retard.plafond}
                         </div>
                       )}
                     </div>
@@ -723,19 +777,15 @@ export default function TenderDetail() {
                           ? formatCautionDetail(tender.contract_details.caution_definitive) 
                           : <span className="text-muted-foreground italic">— %</span>}
                       </div>
-                      {typeof tender.contract_details.caution_definitive === 'object' && tender.contract_details.caution_definitive && (
-                        <>
-                          {tender.contract_details.caution_definitive.base && (
-                            <div className="text-xs text-muted-foreground mt-0.5">
-                              {tender.contract_details.caution_definitive.base}
-                            </div>
-                          )}
-                          {tender.contract_details.caution_definitive.montant_estime && (
+                      {tender.contract_details.caution_definitive && (
+                        (() => {
+                          const calculated = calculateCautionMontantDetail(avisMetadata?.estimation_totale, tender.contract_details.caution_definitive);
+                          return calculated ? (
                             <div className="text-xs text-primary font-mono mt-1 font-semibold">
-                              ≈ {tender.contract_details.caution_definitive.montant_estime}
+                              ≈ {calculated}
                             </div>
-                          )}
-                        </>
+                          ) : null;
+                        })()
                       )}
                     </div>
                   </div>

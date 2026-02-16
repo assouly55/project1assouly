@@ -61,47 +61,92 @@ function MetadataField({ label, value }: { label: string; value: string | null |
 
 // --- Contract detail formatting helpers ---
 
-/** Format délai d'exécution as a clean period string */
+/** Format délai as clean "X Jours" | "X Mois" | "X Ans" */
 function formatDelai(raw: string): string {
   if (!raw) return '—';
-  const lower = raw.toLowerCase().trim();
-  // Extract number + unit
-  const match = lower.match(/(\d+)\s*(jours?|mois|ans?|semaines?|days?|months?|years?|weeks?|calendaires?|ouvrables?)/i);
-  if (match) {
-    const num = match[1];
-    const unit = match[2].toLowerCase();
-    if (unit.startsWith('jour') || unit.startsWith('day') || unit.startsWith('calendaire') || unit.startsWith('ouvrable')) return `${num} Jours`;
-    if (unit.startsWith('mois') || unit.startsWith('month')) return `${num} Mois`;
-    if (unit.startsWith('an') || unit.startsWith('year')) return `${num} Ans`;
-    if (unit.startsWith('semaine') || unit.startsWith('week')) return `${num} Semaines`;
-  }
-  return raw;
+  const match = raw.match(/(\d+)/);
+  if (!match) return raw;
+  const num = match[1];
+  const lower = raw.toLowerCase();
+  if (/mois|month/i.test(lower)) return `${num} Mois`;
+  if (/an|year/i.test(lower)) return `${num} Ans`;
+  if (/semaine|week/i.test(lower)) return `${num} Semaines`;
+  return `${num} Jours`;
 }
 
-/** Format pénalité de retard as a percentage string */
+/** Normalize penalite taux: "1/1000" → "0.1% /jour", "1%" → "1% /jour" */
 function formatPenalite(pen: ContractDetails['penalite_retard']): string {
   if (!pen) return '—';
   if (typeof pen === 'string') return pen;
   const taux = pen.taux;
   if (!taux) return '—';
-  // Normalize: if it contains ‰ or /1000, display as-is. If it has %, display as-is.
+  const fracMatch = taux.match(/(\d+(?:[.,]\d+)?)\s*[/÷]\s*(\d+)/);
+  if (fracMatch) {
+    const pct = (parseFloat(fracMatch[1].replace(',', '.')) / parseFloat(fracMatch[2])) * 100;
+    return `${pct}% /jour`;
+  }
+  const pctMatch = taux.match(/([\d.,]+)\s*%/);
+  if (pctMatch) return `${pctMatch[1]}% /jour`;
+  const perMilleMatch = taux.match(/([\d.,]+)\s*‰/);
+  if (perMilleMatch) {
+    const pct = parseFloat(perMilleMatch[1].replace(',', '.')) / 10;
+    return `${pct}% /jour`;
+  }
   return taux;
 }
 
-/** Format caution définitive taux */
+/** Format plafond as clean percentage */
+function formatPlafond(plafond: string | null): string | null {
+  if (!plafond) return null;
+  const match = plafond.match(/([\d.,]+)\s*%/);
+  if (match) return `${match[1]}%`;
+  return plafond;
+}
+
+/** Extract numeric percentage from caution */
+function parseCautionPercent(cd: ContractDetails['caution_definitive']): number | null {
+  if (!cd || typeof cd === 'string') return null;
+  const taux = cd.taux;
+  if (!taux) return null;
+  const match = taux.match(/([\d.,]+)/);
+  if (match) return parseFloat(match[1].replace(',', '.'));
+  return null;
+}
+
+/** Format caution taux as clean percentage */
 function formatCautionTaux(cd: ContractDetails['caution_definitive']): string {
   if (!cd) return '—';
   if (typeof cd === 'string') return cd;
-  const taux = cd.taux;
-  if (!taux) return '—';
-  // Ensure it shows as percentage
-  const clean = taux.trim();
-  if (!clean.includes('%')) return `${clean}%`;
-  return clean;
+  const pct = parseCautionPercent(cd);
+  if (pct !== null) return `${pct}%`;
+  return cd.taux || '—';
+}
+
+/** Parse estimation montant string to number */
+function parseEstimation(montant: string | null | undefined): number | null {
+  if (!montant) return null;
+  const clean = montant.replace(/\s/g, '').replace(',', '.');
+  const match = clean.match(/([\d.]+)/);
+  if (match) return parseFloat(match[1]);
+  return null;
+}
+
+/** Calculate: estimation × (caution% / 100) */
+function calculateCautionMontant(
+  estimation: { montant: string | null; devise: string | null } | undefined,
+  caution: ContractDetails['caution_definitive']
+): string | null {
+  const estValue = parseEstimation(estimation?.montant);
+  const pct = parseCautionPercent(caution);
+  if (estValue === null || pct === null) return null;
+  const amount = estValue * (pct / 100);
+  const devise = estimation?.devise || 'DH';
+  return `${amount.toLocaleString('fr-FR', { maximumFractionDigits: 2 })} ${devise}`;
 }
 
 function AvisMetadataDetails({ rawMetadata, contractDetails }: { rawMetadata: any; contractDetails?: ContractDetails | null }) {
   const metadata = normalizeAvisMetadata(rawMetadata);
+  const estimationForCalc = metadata?.estimation_totale;
   
   if (!metadata) {
     return (
@@ -208,7 +253,7 @@ function AvisMetadataDetails({ rawMetadata, contractDetails }: { rawMetadata: an
                 <span className="text-xs text-muted-foreground block">Pénalité de retard</span>
                 <span>{contractDetails.penalite_retard ? formatPenalite(contractDetails.penalite_retard) : <span className="text-muted-foreground italic">— %</span>}</span>
                 {typeof contractDetails.penalite_retard === 'object' && contractDetails.penalite_retard?.plafond && (
-                  <span className="text-xs text-muted-foreground block">Plafond: {contractDetails.penalite_retard.plafond}</span>
+                  <span className="text-xs text-muted-foreground block">Plafond: {formatPlafond(contractDetails.penalite_retard.plafond) || contractDetails.penalite_retard.plafond}</span>
                 )}
               </div>
             </div>
@@ -224,9 +269,12 @@ function AvisMetadataDetails({ rawMetadata, contractDetails }: { rawMetadata: an
               <div>
                 <span className="text-xs text-muted-foreground block">Caution Déf.</span>
                 <span>{contractDetails.caution_definitive ? formatCautionTaux(contractDetails.caution_definitive) : <span className="text-muted-foreground italic">— %</span>}</span>
-                {typeof contractDetails.caution_definitive === 'object' && contractDetails.caution_definitive?.montant_estime && (
-                  <span className="text-xs text-primary block font-mono">≈ {contractDetails.caution_definitive.montant_estime}</span>
-                )}
+                {(() => {
+                  const calculatedMontant = calculateCautionMontant(estimationForCalc, contractDetails.caution_definitive);
+                  return calculatedMontant ? (
+                    <span className="text-xs text-primary block font-mono">≈ {calculatedMontant}</span>
+                  ) : null;
+                })()}
               </div>
             </div>
           </div>
