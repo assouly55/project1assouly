@@ -676,67 +676,69 @@ export default function TenderDetail() {
               <div className="data-card">
                 <h3 className="font-medium mb-4">Détails Contractuels</h3>
                 <div className="grid md:grid-cols-2 gap-4">
-                  {tender.contract_details.delai_execution && (
-                    <div className="flex items-start gap-3 p-3 rounded-lg bg-muted/30">
-                      <Clock className="w-5 h-5 text-primary mt-0.5 flex-shrink-0" />
-                      <div>
-                        <div className="text-xs text-muted-foreground mb-1">Délai d'exécution</div>
-                        <div className="font-medium text-sm">{formatDelaiDetail(tender.contract_details.delai_execution)}</div>
+                  <div className="flex items-start gap-3 p-3 rounded-lg bg-muted/30">
+                    <Clock className="w-5 h-5 text-primary mt-0.5 flex-shrink-0" />
+                    <div>
+                      <div className="text-xs text-muted-foreground mb-1">Délai d'exécution</div>
+                      <div className="font-medium text-sm">
+                        {tender.contract_details.delai_execution 
+                          ? formatDelaiDetail(tender.contract_details.delai_execution) 
+                          : <span className="text-muted-foreground italic">— Jours</span>}
                       </div>
                     </div>
-                  )}
-                  {tender.contract_details.penalite_retard && (
-                    <div className="flex items-start gap-3 p-3 rounded-lg bg-muted/30">
-                      <Percent className="w-5 h-5 text-warning mt-0.5 flex-shrink-0" />
-                      <div>
-                        <div className="text-xs text-muted-foreground mb-1">Pénalité de retard</div>
-                        <div className="font-medium text-sm">
-                          {typeof tender.contract_details.penalite_retard === 'string' 
-                            ? tender.contract_details.penalite_retard 
-                            : tender.contract_details.penalite_retard.taux || '—'}
+                  </div>
+                  <div className="flex items-start gap-3 p-3 rounded-lg bg-muted/30">
+                    <Percent className="w-5 h-5 text-warning mt-0.5 flex-shrink-0" />
+                    <div>
+                      <div className="text-xs text-muted-foreground mb-1">Pénalité de retard</div>
+                      <div className="font-medium text-sm">
+                        {tender.contract_details.penalite_retard
+                          ? (typeof tender.contract_details.penalite_retard === 'string' 
+                              ? tender.contract_details.penalite_retard 
+                              : tender.contract_details.penalite_retard.taux || '— %')
+                          : <span className="text-muted-foreground italic">— %</span>}
+                      </div>
+                      {typeof tender.contract_details.penalite_retard === 'object' && tender.contract_details.penalite_retard?.plafond && (
+                        <div className="text-xs text-muted-foreground mt-0.5">
+                          Plafond: {tender.contract_details.penalite_retard.plafond}
                         </div>
-                        {typeof tender.contract_details.penalite_retard === 'object' && tender.contract_details.penalite_retard.plafond && (
-                          <div className="text-xs text-muted-foreground mt-0.5">
-                            Plafond: {tender.contract_details.penalite_retard.plafond}
-                          </div>
-                        )}
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-start gap-3 p-3 rounded-lg bg-muted/30">
+                    <Award className="w-5 h-5 text-success mt-0.5 flex-shrink-0" />
+                    <div>
+                      <div className="text-xs text-muted-foreground mb-1">Mode d'attribution</div>
+                      <div className="font-medium text-sm">
+                        {tender.contract_details.mode_attribution || <span className="text-muted-foreground italic">—</span>}
                       </div>
                     </div>
-                  )}
-                  {tender.contract_details.mode_attribution && (
-                    <div className="flex items-start gap-3 p-3 rounded-lg bg-muted/30">
-                      <Award className="w-5 h-5 text-success mt-0.5 flex-shrink-0" />
-                      <div>
-                        <div className="text-xs text-muted-foreground mb-1">Mode d'attribution</div>
-                        <div className="font-medium text-sm">{tender.contract_details.mode_attribution}</div>
+                  </div>
+                  <div className="flex items-start gap-3 p-3 rounded-lg bg-muted/30">
+                    <Shield className="w-5 h-5 text-primary mt-0.5 flex-shrink-0" />
+                    <div>
+                      <div className="text-xs text-muted-foreground mb-1">Caution Définitive</div>
+                      <div className="font-medium text-sm">
+                        {tender.contract_details.caution_definitive 
+                          ? formatCautionDetail(tender.contract_details.caution_definitive) 
+                          : <span className="text-muted-foreground italic">— %</span>}
                       </div>
+                      {typeof tender.contract_details.caution_definitive === 'object' && tender.contract_details.caution_definitive && (
+                        <>
+                          {tender.contract_details.caution_definitive.base && (
+                            <div className="text-xs text-muted-foreground mt-0.5">
+                              {tender.contract_details.caution_definitive.base}
+                            </div>
+                          )}
+                          {tender.contract_details.caution_definitive.montant_estime && (
+                            <div className="text-xs text-primary font-mono mt-1 font-semibold">
+                              ≈ {tender.contract_details.caution_definitive.montant_estime}
+                            </div>
+                          )}
+                        </>
+                      )}
                     </div>
-                  )}
-                  {tender.contract_details.caution_definitive && (
-                    <div className="flex items-start gap-3 p-3 rounded-lg bg-muted/30">
-                      <Shield className="w-5 h-5 text-primary mt-0.5 flex-shrink-0" />
-                      <div>
-                        <div className="text-xs text-muted-foreground mb-1">Caution Définitive</div>
-                        <div className="font-medium text-sm">
-                          {formatCautionDetail(tender.contract_details.caution_definitive)}
-                        </div>
-                        {typeof tender.contract_details.caution_definitive === 'object' && (
-                          <>
-                            {tender.contract_details.caution_definitive.base && (
-                              <div className="text-xs text-muted-foreground mt-0.5">
-                                {tender.contract_details.caution_definitive.base}
-                              </div>
-                            )}
-                            {tender.contract_details.caution_definitive.montant_estime && (
-                              <div className="text-xs text-primary font-mono mt-1 font-semibold">
-                                ≈ {tender.contract_details.caution_definitive.montant_estime}
-                              </div>
-                            )}
-                          </>
-                        )}
-                      </div>
-                    </div>
-                  )}
+                  </div>
                 </div>
               </div>
             )}

@@ -195,48 +195,40 @@ function AvisMetadataDetails({ rawMetadata, contractDetails }: { rawMetadata: an
             Détails Contractuels
           </span>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            {contractDetails.delai_execution && (
-              <div className="flex items-center gap-2 text-sm">
-                <Clock className="w-3.5 h-3.5 text-primary flex-shrink-0" />
-                <div>
-                  <span className="text-xs text-muted-foreground block">Délai d'exécution</span>
-                  <span>{formatDelai(contractDetails.delai_execution)}</span>
-                </div>
+            <div className="flex items-center gap-2 text-sm">
+              <Clock className="w-3.5 h-3.5 text-primary flex-shrink-0" />
+              <div>
+                <span className="text-xs text-muted-foreground block">Délai d'exécution</span>
+                <span>{contractDetails.delai_execution ? formatDelai(contractDetails.delai_execution) : <span className="text-muted-foreground italic">— Jours</span>}</span>
               </div>
-            )}
-            {contractDetails.penalite_retard && (
-              <div className="flex items-center gap-2 text-sm">
-                <Percent className="w-3.5 h-3.5 text-warning flex-shrink-0" />
-                <div>
-                  <span className="text-xs text-muted-foreground block">Pénalité de retard</span>
-                  <span>{formatPenalite(contractDetails.penalite_retard)}</span>
-                  {typeof contractDetails.penalite_retard === 'object' && contractDetails.penalite_retard.plafond && (
-                    <span className="text-xs text-muted-foreground block">Plafond: {contractDetails.penalite_retard.plafond}</span>
-                  )}
-                </div>
+            </div>
+            <div className="flex items-center gap-2 text-sm">
+              <Percent className="w-3.5 h-3.5 text-warning flex-shrink-0" />
+              <div>
+                <span className="text-xs text-muted-foreground block">Pénalité de retard</span>
+                <span>{contractDetails.penalite_retard ? formatPenalite(contractDetails.penalite_retard) : <span className="text-muted-foreground italic">— %</span>}</span>
+                {typeof contractDetails.penalite_retard === 'object' && contractDetails.penalite_retard?.plafond && (
+                  <span className="text-xs text-muted-foreground block">Plafond: {contractDetails.penalite_retard.plafond}</span>
+                )}
               </div>
-            )}
-            {contractDetails.mode_attribution && (
-              <div className="flex items-center gap-2 text-sm">
-                <Award className="w-3.5 h-3.5 text-success flex-shrink-0" />
-                <div>
-                  <span className="text-xs text-muted-foreground block">Attribution</span>
-                  <span>{contractDetails.mode_attribution}</span>
-                </div>
+            </div>
+            <div className="flex items-center gap-2 text-sm">
+              <Award className="w-3.5 h-3.5 text-success flex-shrink-0" />
+              <div>
+                <span className="text-xs text-muted-foreground block">Attribution</span>
+                <span>{contractDetails.mode_attribution || <span className="text-muted-foreground italic">—</span>}</span>
               </div>
-            )}
-            {contractDetails.caution_definitive && (
-              <div className="flex items-center gap-2 text-sm">
-                <Shield className="w-3.5 h-3.5 text-primary flex-shrink-0" />
-                <div>
-                  <span className="text-xs text-muted-foreground block">Caution Déf.</span>
-                  <span>{formatCautionTaux(contractDetails.caution_definitive)}</span>
-                  {typeof contractDetails.caution_definitive === 'object' && contractDetails.caution_definitive.montant_estime && (
-                    <span className="text-xs text-primary block font-mono">≈ {contractDetails.caution_definitive.montant_estime}</span>
-                  )}
-                </div>
+            </div>
+            <div className="flex items-center gap-2 text-sm">
+              <Shield className="w-3.5 h-3.5 text-primary flex-shrink-0" />
+              <div>
+                <span className="text-xs text-muted-foreground block">Caution Déf.</span>
+                <span>{contractDetails.caution_definitive ? formatCautionTaux(contractDetails.caution_definitive) : <span className="text-muted-foreground italic">— %</span>}</span>
+                {typeof contractDetails.caution_definitive === 'object' && contractDetails.caution_definitive?.montant_estime && (
+                  <span className="text-xs text-primary block font-mono">≈ {contractDetails.caution_definitive.montant_estime}</span>
+                )}
               </div>
-            )}
+            </div>
           </div>
         </div>
       )}
