@@ -17,10 +17,7 @@ from loguru import logger
 from app.core.config import settings
 from app.core.database import init_db
 from app.api.routes import router
-
-from app.core.config import settings
-from app.core.database import init_db
-from app.api.routes import router
+from app.api.auth_routes import auth_router
 
 # Configure logging
 logger.remove()
@@ -50,6 +47,7 @@ app.add_middleware(
 
 # Include routes
 app.include_router(router)
+app.include_router(auth_router)
 
 
 @app.get("/")

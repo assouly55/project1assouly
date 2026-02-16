@@ -351,7 +351,12 @@ function LoadingOverlay({ progress, message }: { progress: number; message: stri
   );
 }
 
-export default function TenderDetail() {
+interface TenderDetailProps {
+  layoutWrapper?: React.ComponentType<{ children: React.ReactNode }>;
+}
+
+export default function TenderDetail({ layoutWrapper }: TenderDetailProps = {}) {
+  const Layout = layoutWrapper || AppLayout;
   const { id } = useParams<{ id: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
   const [tender, setTender] = useState<Tender | null>(null);
@@ -547,17 +552,17 @@ export default function TenderDetail() {
 
   if (loading) {
     return (
-      <AppLayout>
+      <Layout>
         <div className="flex items-center justify-center h-64">
           <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
         </div>
-      </AppLayout>
+      </Layout>
     );
   }
 
   if (error || !tender) {
     return (
-      <AppLayout>
+      <Layout>
         <div className="space-y-6">
           <Link 
             to="/" 
@@ -572,12 +577,12 @@ export default function TenderDetail() {
             <p className="text-muted-foreground">{error || 'Appel d\'offres non trouvé'}</p>
           </div>
         </div>
-      </AppLayout>
+      </Layout>
     );
   }
 
   return (
-    <AppLayout>
+    <Layout>
       {analyzing && (
         <LoadingOverlay progress={analyzeProgress} message={analyzeMessage} />
       )}
@@ -923,6 +928,6 @@ export default function TenderDetail() {
           </TabsContent>
         </Tabs>
       </div>
-    </AppLayout>
+    </Layout>
   );
 }

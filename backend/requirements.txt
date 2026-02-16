@@ -46,5 +46,8 @@ pydantic-settings>=2.5.0
 # Scheduling
 apscheduler>=3.10.4
 
+# Authentication
+PyJWT>=2.8.0
+
 # Logging
 loguru>=0.7.2

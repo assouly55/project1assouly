@@ -47,6 +47,9 @@ class Settings(BaseSettings):
     # Category filter (2 = Fournitures)
     CATEGORY_FILTER: str = "2"
     
+    # JWT Authentication
+    JWT_SECRET: str = "tender-ai-secret-key-change-in-production"
+    
     # Test mode - run immediately instead of scheduled
     TEST_MODE: bool = True
     
